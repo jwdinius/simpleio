@@ -11,6 +11,8 @@
 
 namespace simpleio {
 
+static auto constexpr DEFAULT_MAX_BLOB_SIZE = 1024;
+
 /// @brief Exception thrown when a serialization or deserialization error
 /// occurs.
 class SerializationError : public std::runtime_error {
@@ -54,7 +56,7 @@ class SerializationStrategy {
 /// @tparam T, the type of the data structure to encapsulate.
 /// @tparam MaxBlobSize, the maximum size of the serialized data structure (in
 /// bytes). (default: 1024)
-template <typename T, size_t MaxBlobSize = 1024>
+template <typename T, size_t MaxBlobSize = DEFAULT_MAX_BLOB_SIZE>
 class Message {
  public:
   /// @brief Expose the type definition of the data structure encapsulated by
@@ -74,10 +76,10 @@ class Message {
   /// @throw SerializationError, if an error occurs during serialization.
   explicit Message(T const& entity,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : entity_(entity), strategy_(strategy) {
-    auto blob = strategy_->serialize(entity_);
-    length_ = blob.size();
-    std::copy(blob.begin(), blob.end(), blob_.begin());
+      : entity_(entity), strategy_(std::move(strategy)) {
+    auto _blob = strategy_->serialize(entity_);
+    length_ = _blob.size();
+    std::copy(_blob.begin(), _blob.end(), blob_.begin());
   }
 
   /// @brief Construct from a moved data structure of type T and a
@@ -87,10 +89,10 @@ class Message {
   /// @throw SerializationError, if an error occurs during serialization.
   explicit Message(T&& entity,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : entity_(std::move(entity)), strategy_(strategy) {
-    auto blob = strategy_->serialize(entity_);
-    length_ = blob.size();
-    std::move(blob.begin(), blob.end(), blob_.begin());
+      : entity_(std::move(entity)), strategy_(std::move(strategy)) {
+    auto _blob = strategy_->serialize(entity_);
+    length_ = _blob.size();
+    std::move(_blob.begin(), _blob.end(), blob_.begin());
   }
 
   /// @brief Construct a message from a byte vector and a
@@ -98,11 +100,11 @@ class Message {
   /// @param blob, the byte vector to deserialize and encapsulate
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializationError, if an error occurs during deserialization.
-  explicit Message(std::vector<std::byte> const& blob,
+  explicit Message(std::vector<std::byte> const& _blob,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : strategy_(strategy) {
-    length_ = blob.size();
-    std::copy(blob.begin(), blob.end(), blob_.begin());
+      : strategy_(std::move(strategy)) {
+    length_ = _blob.size();
+    std::copy(_blob.begin(), _blob.end(), blob_.begin());
     std::vector<std::byte> blob_copy{blob_.begin(), blob_.begin() + length_};
     entity_ = strategy_->deserialize(blob_copy);
   }
@@ -112,11 +114,11 @@ class Message {
   /// @param blob, the byte vector to deserialize and encapsulate
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializationError, if an error occurs during deserialization.
-  explicit Message(std::vector<std::byte>&& blob,
+  explicit Message(std::vector<std::byte>&& _blob,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : strategy_(strategy) {
-    length_ = blob.size();
-    std::move(blob.begin(), blob.end(), blob_.begin());
+      : strategy_(std::move(strategy)) {
+    length_ = _blob.size();
+    std::move(_blob.begin(), _blob.end(), blob_.begin());
     std::vector<std::byte> blob_copy{blob_.begin(), blob_.begin() + length_};
     entity_ = strategy_->deserialize(blob_copy);
   }
@@ -125,15 +127,15 @@ class Message {
 
   /// @brief Return the data structure in native format.
   /// @return T, the native data type of the Message.
-  T entity() const {
+  [[nodiscard]] T entity() const {
     return entity_;
   }
 
   /// @brief Return (a view of) the serialized data structure.
   /// @return gsl::span<const std::byte>, a view of the serialized data
   /// structure.
-  gsl::span<const std::byte> blob() const {
-    return gsl::span<const std::byte>(blob_.data(), length_);
+  [[nodiscard]] gsl::span<const std::byte> blob() const {
+    return {blob_.data(), length_};
   }
 
  private:

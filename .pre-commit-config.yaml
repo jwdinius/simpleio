@@ -14,14 +14,15 @@ repos:
     hooks:
       - id: clang-format
         args: ["--style=file", "-i"]
-        files: \.(cpp|hpp|c|h|cc|hh|cxx|hxx)$
-
-  - repo: https://github.com/cpplint/cpplint
-    rev: 2.0.0
-    hooks:
       - id: cpplint
         args: [
           "--linelength=80",
           "--filter=+whitespace/indent,-build/include_order,-build/c++17"
         ]
-        files: \.(cpp|hpp|cc|hh|c|h|cxx|hxx|CMakeLists\.txt)$
+      - id: cppcheck
+        args: [
+          "--enable=all",
+          "--std=c++17",
+          "--inline-suppr",
+          "--template=gcc"
+        ]

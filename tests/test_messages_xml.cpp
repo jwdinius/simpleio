@@ -29,7 +29,7 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   {
     auto entity = xml_msg->entity();
     EXPECT_NE(entity, nullptr);
-    auto message = entity->documentElement();
+    auto *message = entity->documentElement();
     EXPECT_NE(message, nullptr);
     EXPECT_EQ(message->nodeName(), "message");
     EXPECT_EQ(message->getAttribute("id"), "1");
@@ -48,7 +48,7 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   // Verify the unpacked XML document
   {
     auto entity = xml_msg_from_serialized->entity();
-    auto message = entity->documentElement();
+    auto *message = entity->documentElement();
     EXPECT_NE(message, nullptr);
     EXPECT_EQ(message->nodeName(), "message");
     EXPECT_EQ(message->getAttribute("id"), "1");

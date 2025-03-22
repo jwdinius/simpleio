@@ -9,8 +9,7 @@
 
 #include "simpleio/message.hpp"
 
-namespace simpleio {
-namespace messages {
+namespace simpleio::messages {
 
 /// @brief Define XmlMessageType as a Poco XML Document.
 /// @details XML messages use Poco's XML library to handle XML documents.
@@ -33,5 +32,5 @@ class XmlSerializer : public SerializationStrategy<XmlMessageType> {
   /// @throw SerializationError, if an error occurs during deserialization.
   XmlMessageType deserialize(std::vector<std::byte> const& entity) override;
 };
-}  // namespace messages
-}  // namespace simpleio
+
+}  // namespace simpleio::messages

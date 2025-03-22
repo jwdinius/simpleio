@@ -11,41 +11,44 @@ namespace sio = simpleio;
 namespace siotrns = simpleio::transports;
 
 siotrns::UdpSendStrategy::UdpSendStrategy(
-    std::shared_ptr<boost::asio::io_context> const io,
-    boost::asio::ip::udp::endpoint const& remote_endpoint)
-    : socket_(*io), remote_endpoint_(remote_endpoint) {
+    std::shared_ptr<boost::asio::io_context> const& io_ctx,
+    boost::asio::ip::udp::endpoint remote_endpoint)
+    : socket_(*io_ctx), remote_endpoint_(std::move(remote_endpoint)) {
   BOOST_LOG_TRIVIAL(debug) << "Configuring SendStrategy to "
                            << remote_endpoint_;
 }
 
-void siotrns::UdpSendStrategy::send(const std::vector<std::byte>& blob) {
+void siotrns::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
   socket_.open(boost::asio::ip::udp::v4());
   socket_.async_send_to(
       boost::asio::buffer(blob), remote_endpoint_,
-      [this](boost::system::error_code ec, std::size_t bytes_sent) {
-        if (!ec) {
+      [this](boost::system::error_code err_code, std::size_t bytes_sent) {
+        if (!err_code) {
           BOOST_LOG_TRIVIAL(debug)
               << "Sent " << bytes_sent << " bytes to " << remote_endpoint_;
         } else {
-          BOOST_LOG_TRIVIAL(error) << "Error sending data: " << ec.message();
+          BOOST_LOG_TRIVIAL(error)
+              << "Error sending data: " << err_code.message();
         }
       });
   socket_.close();
 }
 
 siotrns::UdpReceiveStrategy::UdpReceiveStrategy(
-    std::shared_ptr<boost::asio::io_context> const io,
+    std::shared_ptr<boost::asio::io_context> const& io_ctx,
     boost::asio::ip::udp::endpoint const& local_endpoint,
     size_t const& max_blob_size)
-    : socket_(*io, local_endpoint),
-      max_blob_size_(max_blob_size),
-      ReceiveStrategy() {
+    : socket_(*io_ctx, local_endpoint), max_blob_size_(max_blob_size) {
   BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_.local_endpoint();
   start_receiving();
 }
 
 siotrns::UdpReceiveStrategy::~UdpReceiveStrategy() {
-  socket_.close();
+  try {
+    socket_.close();
+  } catch (std::exception const& e) {
+    BOOST_LOG_TRIVIAL(error) << "Exception in destructor: " << e.what();
+  }
 }
 
 void siotrns::UdpReceiveStrategy::start_receiving() {
@@ -54,9 +57,9 @@ void siotrns::UdpReceiveStrategy::start_receiving() {
 
   socket_.async_receive_from(
       boost::asio::buffer(*buffer), *remote_endpoint,
-      [this, buffer, remote_endpoint](boost::system::error_code ec,
+      [this, buffer, remote_endpoint](boost::system::error_code err_code,
                                       size_t bytes_recvd) {
-        if (!ec && bytes_recvd > 0) {
+        if (!err_code && bytes_recvd > 0) {
           BOOST_LOG_TRIVIAL(debug) << "Received " << bytes_recvd
                                    << " bytes from " << *remote_endpoint;
           buffer->resize(bytes_recvd);
@@ -64,7 +67,8 @@ void siotrns::UdpReceiveStrategy::start_receiving() {
           start_receiving();
         } else {
           // Handle the error
-          BOOST_LOG_TRIVIAL(error) << "Error receiving data: " << ec.message();
+          BOOST_LOG_TRIVIAL(error)
+              << "Error receiving data: " << err_code.message();
         }
       });
   BOOST_LOG_TRIVIAL(debug) << "Waiting for data...";

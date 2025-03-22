@@ -46,7 +46,7 @@ class Sender {
   /// @brief Construct from a SendStrategy object.
   /// @param strategy, the SendStrategy object to use.
   explicit Sender(std::shared_ptr<SendStrategy> strategy)
-      : strategy_(strategy) {}
+      : strategy_(std::move(strategy)) {}
 
   ~Sender() = default;
 
@@ -92,7 +92,7 @@ class Receiver {
   /// @brief Construct from a ReceiveStrategy object.
   /// @param strategy, the ReceiveStrategy object to use.
   explicit Receiver(std::shared_ptr<ReceiveStrategy> strategy)
-      : strategy_(strategy) {}
+      : strategy_(std::move(strategy)) {}
 
   /// @brief Extract a message from the receive queue.
   /// @return MessageT, the extracted message.

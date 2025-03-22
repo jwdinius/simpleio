@@ -14,6 +14,7 @@ RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --de
 RUN echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main" | tee /etc/apt/sources.list.d/kitware.list > /dev/null
 
 RUN apt-get update && apt-get install -y \
+   clang-format \
    curl \
    python3 \
    python3-pip \
@@ -23,7 +24,6 @@ RUN apt-get update && apt-get install -y \
    kitware-archive-keyring \
    cmake \
    libboost-all-dev \
-   libfmt-dev \
    libpoco-dev \
    libgtest-dev \
    libmsgsl-dev
@@ -35,4 +35,9 @@ RUN adduser $USERNAME sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 USER $USERNAME
+
+# install python dependencies
+RUN python3 -m pip install pre-commit cpplint \
+   && echo "export PYTHONPATH=$HOME/.local/bin:$PYTHONPATH" >> $HOME/.bashrc \
+   && echo "export PATH=$PATH:$HOME/.local/bin" >> $HOME/.bashrc
 WORKDIR /home/$USERNAME

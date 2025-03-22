@@ -19,7 +19,7 @@ add_test(NAME test_messages_xml COMMAND test_messages_xml)
 set(CERTS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/certs)
 file(GENERATE
   OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/certs_path.h"
-  CONTENT "inline constexpr char CERTS_PATH[] = \"${CERTS_PATH}\";"
+  CONTENT "inline constexpr char CERTS_PATH[] = \"${CERTS_PATH}\";  //NOLINT"
 )
 
 add_executable(test_transports_ip test_transports_ip.cpp)  # Adjust the path to your test file

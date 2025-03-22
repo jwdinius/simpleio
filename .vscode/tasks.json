@@ -4,15 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Configure simpleio",
+            "label": "Build",
             "type": "shell",
-            "command": "cmake -S . -B build",
-        },
-        {
-            "label": "Build simpleio",
-            "type": "shell",
-            "command": "cmake --build build",
-            "dependsOn": "Configure simpleio",
+            "command": "./scripts/build",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -21,10 +15,10 @@
             ]
         },
         {
-            "label": "Run simpleio tests",
+            "label": "Test",
             "type": "shell",
-            "command": "ctest --test-dir build/tests --output-on-failure",
-            "dependsOn": ["Build simpleio"],
+            "command": "./scripts/test",
+            "dependsOn": ["Build"],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -32,6 +26,15 @@
             "problemMatcher": [
                 "$gcc"
             ]
-        }
+        },
+        {
+            "label": "Analyze",
+            "type": "shell",
+            "command": "./scripts/analyze",
+            "dependsOn": ["Test"],
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
     ]
 }

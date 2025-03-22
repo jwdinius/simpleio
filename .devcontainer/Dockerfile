@@ -15,6 +15,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https:
 
 RUN apt-get update && apt-get install -y \
    clang-format \
+   clang-tidy \
+   cppcheck \
    curl \
    python3 \
    python3-pip \
@@ -27,6 +29,8 @@ RUN apt-get update && apt-get install -y \
    libpoco-dev \
    libgtest-dev \
    libmsgsl-dev \
+   llvm \
+   uncrustify \
    vim
 
 # setup user env at the end

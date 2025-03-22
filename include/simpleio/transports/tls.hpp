@@ -9,8 +9,7 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio {
-namespace transports {
+namespace simpleio::transports {
 
 /// @brief Configuration for TLS v1.3 transport.
 /// @details This struct holds the paths to the Certificate Authority (CA) file,
@@ -26,15 +25,14 @@ class TlsSendStrategy : public SendStrategy {
  public:
   /// @brief Construct from a shared io_context, a TLS configuration, and a
   /// remote endpoint.
-  /// @param io, the shared io_context.
+  /// @param io_ctx, the shared io_context.
   /// @param tls_config, the TLS configuration to use.
   /// @param remote_endpoint, the remote endpoint to send to.
   /// @throw std::runtime_error, if an error occurs while setting up the SSL
   /// context.
-  explicit TlsSendStrategy(
-      std::shared_ptr<boost::asio::io_context> const io,
-      TlsConfig const& tls_config,
-      boost::asio::ip::tcp::endpoint const& remote_endpoint);
+  explicit TlsSendStrategy(std::shared_ptr<boost::asio::io_context> io_ctx,
+                           TlsConfig const& tls_config,
+                           boost::asio::ip::tcp::endpoint remote_endpoint);
 
   /// @brief Send a byte vector securely.
   /// @param blob, the byte vector to send.
@@ -56,33 +54,30 @@ class TlsReceiveStrategy : public ReceiveStrategy {
  public:
   /// @brief Construct from a shared io_context, a TLS configuration, a local
   /// endpoint, and a maximum blob size.
-  /// @param io, the shared io_context.
+  /// @param io_ctx, the shared io_context.
   /// @param tls_config, the TLS configuration to use.
   /// @param local_endpoint, the local endpoint to listen on.
   /// @param max_blob_size, the maximum size of the allocated receive buffer.
   /// @throw std::runtime_error, if an error occurs while setting up the SSL
   /// context.
-  TlsReceiveStrategy(std::shared_ptr<boost::asio::io_context> const io,
+  TlsReceiveStrategy(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                      TlsConfig const& tls_config,
                      boost::asio::ip::tcp::endpoint const& local_endpoint,
                      size_t const& max_blob_size);
 
   /// @brief Destructor
-  ~TlsReceiveStrategy();
+  ~TlsReceiveStrategy() override;
 
  private:
   void start_accepting();
-  void start_handshake(
-      std::shared_ptr<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>
-          socket);
-  void start_receiving(
-      std::shared_ptr<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>
-          socket);
+  void start_handshake(std::shared_ptr<boost::asio::ssl::stream<
+                           boost::asio::ip::tcp::socket>> const& socket);
+  void start_receiving(std::shared_ptr<boost::asio::ssl::stream<
+                           boost::asio::ip::tcp::socket>> const& socket);
 
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::ssl::context ssl_ctx_;
   size_t const max_blob_size_;
 };
 
-}  // namespace transports
-}  // namespace simpleio
+}  // namespace simpleio::transports

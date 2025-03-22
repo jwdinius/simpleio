@@ -1,0 +1,6 @@
+apt:
+  packages:
+    - clang-format
+    - clang-tidy
+    - cpplint
+    - cppcheck

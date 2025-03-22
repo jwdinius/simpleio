@@ -31,7 +31,9 @@ class AsyncQueue {
   /// @return std::optional<T>, the popped message if the queue is not empty.
   std::optional<T> try_pop() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (queue_.empty()) return std::nullopt;
+    if (queue_.empty()) {
+      return std::nullopt;
+    }
     auto value = std::move(queue_.front());
     queue_.pop();
     return value;

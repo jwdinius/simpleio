@@ -26,7 +26,8 @@ RUN apt-get update && apt-get install -y \
    libboost-all-dev \
    libpoco-dev \
    libgtest-dev \
-   libmsgsl-dev
+   libmsgsl-dev \
+   vim
 
 # setup user env at the end
 # -m option creates a fake writable home folder

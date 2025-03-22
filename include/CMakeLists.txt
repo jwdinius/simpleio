@@ -1,4 +1,4 @@
-target_sources(${PROJECT_NAME}
+target_sources(base
   INTERFACE
     FILE_SET HEADERS
     FILES
@@ -7,38 +7,36 @@ target_sources(${PROJECT_NAME}
       simpleio/transport.hpp
 )
 
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(base
   INTERFACE
     Microsoft.GSL::GSL
 )
 
-target_sources(xml_message
+target_sources(messages_xml
   PUBLIC
     FILE_SET HEADERS
     FILES
-      simpleio/xml_message/xml_message.hpp
+      simpleio/messages/xml.hpp
 )
 
-target_link_libraries(xml_message
+target_link_libraries(messages_xml
   PUBLIC
-    ${PROJECT_NAME}
+    base
     Poco::XML
 )
 
-target_sources(network_transport
-  INTERFACE
+target_sources(transports_ip
+  PUBLIC
     FILE_SET HEADERS
     FILES
-      simpleio/network_transport/tcp.hpp
-      simpleio/network_transport/tls.hpp
-      simpleio/network_transport/udp.hpp
+      simpleio/transports/tcp.hpp
+      simpleio/transports/tls.hpp
+      simpleio/transports/udp.hpp
 )
 
-target_link_libraries(network_transport
-  INTERFACE
-    ${PROJECT_NAME}
+target_link_libraries(transports_ip
+  PUBLIC
+    base
     Boost::system
-    Boost::log
     OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
-    OpenSSL::Crypto
 )

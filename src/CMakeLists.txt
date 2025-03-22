@@ -1,16 +1,17 @@
-# Specify the source files
-target_sources(xml_message
+target_sources(messages_xml
   PRIVATE
-    xml_message.cpp
+    messages/xml.cpp
 )
 
-#target_link_libraries(my_app PRIVATE Poco::Foundation Poco::Net Poco::Util)
+target_sources(transports_ip
+  PRIVATE
+    transports/tcp.cpp
+    transports/tls.cpp
+    transports/udp.cpp
+)
 
-#target_link_libraries(xml_message
-#  PRIVATE
-#    #Boost::log
-#    #Boost::log_setup
-#    #fmt::fmt
-#    #Poco::Net
-#    Poco::XML
-#)
+target_link_libraries(transports_ip
+  PRIVATE
+    Boost::log
+    Boost::log_setup
+)

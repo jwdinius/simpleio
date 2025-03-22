@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(taktile CXX)
+project(simpleio CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -11,16 +11,16 @@ find_package(Poco 1.11 REQUIRED COMPONENTS Net XML)
 find_package(OpenSSL 3 REQUIRED)
 
 # Base classes
-add_library(${PROJECT_NAME} INTERFACE)
-add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+add_library(base INTERFACE)
+add_library(${PROJECT_NAME}::base ALIAS base)
 
 # Message classes
-add_library(xml_message SHARED)
-add_library(${PROJECT_NAME}::xml_message ALIAS xml_message)
+add_library(messages_xml SHARED)
+add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
 
 # Transport classes
-add_library(network_transport INTERFACE)
-add_library(${PROJECT_NAME}::network_transport ALIAS network_transport)
+add_library(transports_ip SHARED)
+add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
 
 add_subdirectory(include)
 add_subdirectory(src)

@@ -32,6 +32,15 @@ jobs:
         run: |
           docker build -t $IMAGE_NAME:$IMAGE_TAG -f .devcontainer/Dockerfile .
 
+      - name: Fix permissions
+        run: |
+          sudo chown -R 0:0 ${{ github.workspace }}
+
+      - name: Run pre-commit
+        run: |
+          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
+            pre-commit run --all-files
+          "
       - name: Tag and push SHA-tagged image
         run: |
           docker push $IMAGE_NAME:$IMAGE_TAG

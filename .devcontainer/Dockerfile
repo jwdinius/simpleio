@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y \
    uncrustify \
    vim
 
+RUN python3 -m pip install pre-commit cpplint
+
 # setup user env at the end
 # -m option creates a fake writable home folder
 RUN adduser --disabled-password --gecos '' $USERNAME
@@ -40,9 +42,4 @@ RUN adduser $USERNAME sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 USER $USERNAME
-
-# install python dependencies
-RUN python3 -m pip install pre-commit cpplint \
-   && echo "export PYTHONPATH=$HOME/.local/bin:$PYTHONPATH" >> $HOME/.bashrc \
-   && echo "export PATH=$PATH:$HOME/.local/bin" >> $HOME/.bashrc
 WORKDIR /home/$USERNAME

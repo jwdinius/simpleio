@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}-devcontainer
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push-image:
+    name: Build and Push Devcontainer Image
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build devcontainer image
+        run: |
+          docker build -t $IMAGE_NAME:$IMAGE_TAG -f .devcontainer/Dockerfile .
+
+      - name: Tag and push SHA-tagged image
+        run: |
+          docker push $IMAGE_NAME:$IMAGE_TAG
+
+      - name: Also tag and push :latest (only on main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:latest
+
+  build-and-test:
+    name: Build and Test
+    needs: build-and-push-image
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and run tests in devcontainer
+        run: |
+          docker pull $IMAGE_NAME:$IMAGE_TAG
+          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
+            ./scripts/build && \
+            ./scripts/test
+          "
+      - name: Upload build directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build
+
+  analyze:
+    name: Analyze
+    needs: build-and-test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: build
+
+      - name: Run clang-tidy in devcontainer
+        run: |
+          docker pull $IMAGE_NAME:$IMAGE_TAG
+          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
+            ./scripts/analyze
+          "

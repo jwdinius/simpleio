@@ -57,7 +57,7 @@ void siotrns::TlsSendStrategy::connect() {
   socket_ =
       std::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(
           *io_ctx_, ssl_ctx_);
-  socket_->lowest_layer().open(boost::asio::ip::tcp::v4());
+  socket_->lowest_layer().open(remote_endpoint_.protocol());
 
   // Attempt to establish a new connection
   boost::system::error_code err_code;

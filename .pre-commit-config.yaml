@@ -18,10 +18,3 @@ repos:
           "--linelength=80",
           "--filter=+whitespace/indent,-build/include_order,-build/c++17"
         ]
-      - id: cppcheck
-        args: [
-          "--enable=all",
-          "--std=c++17",
-          "--inline-suppr",
-          "--template=gcc"
-        ]

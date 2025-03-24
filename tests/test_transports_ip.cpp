@@ -37,7 +37,7 @@ void init_logger() {
 // NOLINTBEGIN[modernize-avoid-c-arrays]
 static constexpr char TEST_IPV4_ADDR[] = "127.0.0.1";
 // NOLINTEND[modernize-avoid-c-arrays]
-static constexpr uint32_t TEST_PORT_NUM = 12345;
+static constexpr uint16_t TEST_PORT_NUM = 12345;
 static constexpr size_t MAX_ITERS = 10;
 
 class SimpleStringSerializer : public sio::SerializationStrategy<std::string> {

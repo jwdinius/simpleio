@@ -30,7 +30,7 @@ class XmlSerializer : public SerializationStrategy<XmlMessageType> {
   /// @param blob, the byte vector to deserialize.
   /// @return XmlMessageType, the deserialized XML Document.
   /// @throw SerializationError, if an error occurs during deserialization.
-  XmlMessageType deserialize(std::vector<std::byte> const& entity) override;
+  XmlMessageType deserialize(std::vector<std::byte> const& blob) override;
 };
 
 }  // namespace simpleio::messages

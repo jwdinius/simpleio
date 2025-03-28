@@ -35,15 +35,13 @@ std::vector<std::byte> siomsg::XmlSerializer::serialize(
 }
 
 siomsg::XmlMessageType siomsg::XmlSerializer::deserialize(
-    std::vector<std::byte> const& entity) {
+    std::vector<std::byte> const& blob) {
   try {
-    std::string xml_string(reinterpret_cast<char const*>(entity.data()),
-                           entity.size());
+    std::string xml_string(reinterpret_cast<char const*>(blob.data()),
+                           blob.size());
     std::istringstream iss(xml_string);
     Poco::XML::DOMParser parser;
     Poco::XML::InputSource input_source(iss);
-    // siomsg::XmlMessageType doc = parser.parse(&input_source);
-    // return doc;
     return parser.parse(&input_source);
   } catch (Poco::Exception& e) {
     throw sio::SerializationError(e.what());

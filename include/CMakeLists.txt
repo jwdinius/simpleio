@@ -25,6 +25,19 @@ target_link_libraries(messages_xml
     Poco::XML
 )
 
+target_sources(messages_json
+  PUBLIC
+    FILE_SET HEADERS
+    FILES
+      simpleio/messages/json.hpp
+)
+
+target_link_libraries(messages_json
+  PUBLIC
+    base
+    nlohmann_json::nlohmann_json
+)
+
 target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS

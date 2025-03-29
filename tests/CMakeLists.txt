@@ -6,7 +6,7 @@ find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
 # Add the test executable
-add_executable(test_messages_xml test_messages_xml.cpp)  # Adjust the path to your test file
+add_executable(test_messages_xml test_messages_xml.cpp)
 target_link_libraries(test_messages_xml
   PRIVATE
     ${GTEST_LIBRARIES}
@@ -14,6 +14,15 @@ target_link_libraries(test_messages_xml
     ${PROJECT_NAME}::messages::xml
 )
 add_test(NAME test_messages_xml COMMAND test_messages_xml)
+
+add_executable(test_messages_json test_messages_json.cpp)
+target_link_libraries(test_messages_json
+  PRIVATE
+    ${GTEST_LIBRARIES}
+    pthread
+    ${PROJECT_NAME}::messages::json
+)
+add_test(NAME test_messages_json COMMAND test_messages_json)
 
 # Install tls certificates to the build directory under the certs directory
 set(CERTS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/certs)

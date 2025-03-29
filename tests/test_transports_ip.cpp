@@ -98,7 +98,7 @@ class TestNetworkTransport : public ::testing::Test {
       work_guard_;
 };
 
-TEST_F(TestNetworkTransport, TestUdpSendAndReceive) {
+TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
   EXPECT_FALSE(io_ctx_->stopped());
   asio::ip::udp::endpoint rcvr_endpoint(
       asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
@@ -109,8 +109,9 @@ TEST_F(TestNetworkTransport, TestUdpSendAndReceive) {
       io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
   auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
 
+  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
   auto sndr_strategy =
-      std::make_shared<siotrns::UdpSendStrategy>(io_ctx_, rcvr_endpoint);
+      std::make_shared<siotrns::UdpSendStrategy>(shared_socket, rcvr_endpoint);
   auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
 
   auto message = SimpleString(string_serializer);
@@ -119,6 +120,44 @@ TEST_F(TestNetworkTransport, TestUdpSendAndReceive) {
     sndr->send(message);
     auto received = rcvr->extract_message<SimpleString>(string_serializer);
     EXPECT_EQ(received.entity(), message.entity());
+  }
+}
+
+TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
+  EXPECT_FALSE(io_ctx_->stopped());
+  asio::ip::udp::endpoint rcvr_endpoint(
+      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
+
+  auto string_serializer = std::make_shared<SimpleStringSerializer>();
+
+  auto rcvr_strategy = std::make_shared<siotrns::UdpReceiveStrategy>(
+      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
+  auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
+
+  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
+  auto shared_strand =
+      std::make_shared<asio::strand<asio::io_context::executor_type>>(
+          io_ctx_->get_executor());
+  auto sndr1_strategy = std::make_shared<siotrns::UdpSendStrategy>(
+      shared_socket, rcvr_endpoint, shared_strand);
+  auto sndr2_strategy = std::make_shared<siotrns::UdpSendStrategy>(
+      shared_socket, rcvr_endpoint, shared_strand);
+  auto sndr1 = std::make_shared<sio::Sender<SimpleString>>(sndr1_strategy);
+  auto sndr2 = std::make_shared<sio::Sender<SimpleString>>(sndr2_strategy);
+
+  auto message = SimpleString(string_serializer);
+
+  for (int i = 0; i < MAX_ITERS; i++) {
+    {
+      sndr1->send(message);
+      auto received = rcvr->extract_message<SimpleString>(string_serializer);
+      EXPECT_EQ(received.entity(), message.entity());
+    }
+    {
+      sndr2->send(message);
+      auto received = rcvr->extract_message<SimpleString>(string_serializer);
+      EXPECT_EQ(received.entity(), message.entity());
+    }
   }
 }
 

@@ -98,7 +98,7 @@ void siotrns::UdpReceiveStrategy::start_receiving() {
           BOOST_LOG_TRIVIAL(debug) << "Received " << bytes_recvd
                                    << " bytes from " << *remote_endpoint;
           buffer->resize(bytes_recvd);
-          this->blob_queue_.push(std::move(*buffer));
+          this->event_cb_(std::move(*buffer));
           start_receiving();
         } else {
           // Handle the error

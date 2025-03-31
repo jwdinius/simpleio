@@ -2,7 +2,7 @@ target_sources(base
   INTERFACE
     FILE_SET HEADERS
     FILES
-      simpleio/async_queue.hpp
+      #simpleio/async_queue.hpp
       simpleio/message.hpp
       simpleio/transport.hpp
 )
@@ -10,6 +10,7 @@ target_sources(base
 target_link_libraries(base
   INTERFACE
     Microsoft.GSL::GSL
+    ThreadPool::ThreadPool
 )
 
 target_sources(messages_xml

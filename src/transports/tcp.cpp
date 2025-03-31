@@ -87,7 +87,7 @@ void siotrns::TcpReceiveStrategy::start_receiving(
         if (err_code == boost::asio::error::eof && bytes_recvd > 0) {
           BOOST_LOG_TRIVIAL(debug) << "Received " << bytes_recvd << " bytes.";
           buffer->resize(bytes_recvd);
-          this->blob_queue_.push(std::move(*buffer));
+          this->event_cb_(std::move(*buffer));
           start_receiving(socket);
         } else {
           BOOST_LOG_TRIVIAL(error)

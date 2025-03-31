@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ThreadPool.h"
 #include "simpleio/async_queue.hpp"
 #include "simpleio/message.hpp"
 
@@ -68,22 +70,29 @@ class Sender {
 ///          over a system interface (e.g., network, serial, etc.).
 class ReceiveStrategy {
  public:
-  /// @brief Default constructor deleted.
   ReceiveStrategy() = default;
 
   /// @brief Declare default destructor to allow inheritance.
   virtual ~ReceiveStrategy() = default;
 
+  void set_event_callback(
+      std::function<void(std::vector<std::byte> const&)> const& event_cb) {
+    event_cb_ = event_cb;
+  }
+
   /// @brief Grant Receiver access to the blob queue to unpack messages.
-  friend class Receiver;
+  // friend class Receiver;
 
  protected:
-  AsyncQueue<std::vector<std::byte>> blob_queue_;
+  std::function<void(std::vector<std::byte> const&)> event_cb_;
+
+  // AsyncQueue<std::vector<std::byte>> ;
 };
 
 /// @brief Message receiver
 /// @details This class is responsible for receiving messages of type MessageT
 ///          using a ReceiveStrategy object.
+template <typename MessageT>
 class Receiver {
  public:
   /// @brief Default constructor deleted.
@@ -91,20 +100,39 @@ class Receiver {
 
   /// @brief Construct from a ReceiveStrategy object.
   /// @param strategy, the ReceiveStrategy object to use.
-  explicit Receiver(std::shared_ptr<ReceiveStrategy> strategy)
-      : strategy_(std::move(strategy)) {}
-
-  /// @brief Extract a message from the receive queue.
-  /// @return MessageT, the extracted message.
-  template <typename MessageT>
-  MessageT extract_message(
+  explicit Receiver(
+      std::shared_ptr<ReceiveStrategy> strategy,
       std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
-          serializer) {
-    return MessageT(std::move(strategy_->blob_queue_.wait_and_pop()),
-                    serializer);
+          serializer,
+      std::shared_ptr<ThreadPool> event_handler,
+      std::function<void(MessageT const&)> const& message_cb)
+      : strategy_(std::move(strategy)),
+        serializer_(std::move(serializer)),
+        event_handler_(std::move(event_handler)) {
+    strategy_->set_event_callback(
+        [this, message_cb](std::vector<std::byte> const& blob) {
+          auto message = MessageT(blob, serializer_);
+          futures_.push(event_handler_->enqueue(
+              [message, message_cb] { return message_cb(message); }));
+        });
+  }
+
+  void wait_for(std::chrono::milliseconds const& period) {
+    std::this_thread::sleep_for(period);
+    if (!futures_.empty()) {
+      auto& future = futures_.front();
+      if (future.valid()) {
+        future.get();
+      }
+      futures_.pop();
+    }
   }
 
  private:
   std::shared_ptr<ReceiveStrategy> strategy_;
+  std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
+      serializer_;
+  std::shared_ptr<ThreadPool> event_handler_;
+  std::queue<std::future<void>> futures_;
 };
 }  // namespace simpleio

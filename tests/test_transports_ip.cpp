@@ -8,8 +8,10 @@
 #include <boost/log/sources/severity_logger.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/log/utility/setup/console.hpp>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -105,21 +107,41 @@ TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
 
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
+  SimpleString message(string_serializer);
+  auto event_handler = std::make_shared<ThreadPool>(1);
+  size_t num_calls = 0;
+  std::mutex mutex;
+  std::condition_variable cv;
+  int count = 0;
+
+  auto message_cb = [&](SimpleString const& received) {
+    std::lock_guard lock(mutex);
+    BOOST_LOG_TRIVIAL(debug)
+        << "Received message: \"" << received.entity() << "\"";
+    EXPECT_EQ(received.entity(), message.entity());
+    if (++num_calls == 10) {
+      cv.notify_one();
+    }
+  };
+
   auto rcvr_strategy = std::make_shared<siotrns::UdpReceiveStrategy>(
       io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
+  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
+      rcvr_strategy, string_serializer, event_handler, message_cb);
 
   auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
   auto sndr_strategy =
       std::make_shared<siotrns::UdpSendStrategy>(shared_socket, rcvr_endpoint);
   auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
 
-  auto message = SimpleString(string_serializer);
-
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
-    auto received = rcvr->extract_message<SimpleString>(string_serializer);
-    EXPECT_EQ(received.entity(), message.entity());
+  }
+  {
+    std::unique_lock lock(mutex);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::milliseconds(100),
+                            [&] { return num_calls == MAX_ITERS; }))
+        << "Expected 10 callbacks, got " << count;
   }
 }
 
@@ -130,9 +152,19 @@ TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
 
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
+  SimpleString message(string_serializer);
+  auto event_handler = std::make_shared<ThreadPool>(1);
+  size_t num_calls = 0;
+  auto message_cb = [message, &num_calls](SimpleString const& received) {
+    EXPECT_EQ(received.entity(), message.entity());
+    num_calls++;
+    BOOST_LOG_TRIVIAL(debug)
+        << "Received message: \"" << received.entity() << "\"";
+  };
   auto rcvr_strategy = std::make_shared<siotrns::UdpReceiveStrategy>(
       io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
+  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
+      rcvr_strategy, string_serializer, event_handler, message_cb);
 
   auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
   auto shared_strand =
@@ -145,20 +177,12 @@ TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
   auto sndr1 = std::make_shared<sio::Sender<SimpleString>>(sndr1_strategy);
   auto sndr2 = std::make_shared<sio::Sender<SimpleString>>(sndr2_strategy);
 
-  auto message = SimpleString(string_serializer);
-
   for (int i = 0; i < MAX_ITERS; i++) {
-    {
-      sndr1->send(message);
-      auto received = rcvr->extract_message<SimpleString>(string_serializer);
-      EXPECT_EQ(received.entity(), message.entity());
-    }
-    {
-      sndr2->send(message);
-      auto received = rcvr->extract_message<SimpleString>(string_serializer);
-      EXPECT_EQ(received.entity(), message.entity());
-    }
+    sndr1->send(message);
+    sndr2->send(message);
+    rcvr->wait_for(std::chrono::milliseconds(10));
   }
+  EXPECT_EQ(num_calls, MAX_ITERS * 2);
 }
 
 TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
@@ -168,21 +192,29 @@ TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
 
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
+  SimpleString message(string_serializer);
+  auto event_handler = std::make_shared<ThreadPool>(1);
+  size_t num_calls = 0;
+  auto message_cb = [message, &num_calls](SimpleString const& received) {
+    EXPECT_EQ(received.entity(), message.entity());
+    num_calls++;
+    BOOST_LOG_TRIVIAL(debug)
+        << "Received message: \"" << received.entity() << "\"";
+  };
   auto rcvr_strategy = std::make_shared<siotrns::TcpReceiveStrategy>(
       io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
+  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
+      rcvr_strategy, string_serializer, event_handler, message_cb);
 
   auto sndr_strategy =
       std::make_shared<siotrns::TcpSendStrategy>(io_ctx_, rcvr_endpoint);
   auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
 
-  auto message = SimpleString(string_serializer);
-
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
-    auto received = rcvr->extract_message<SimpleString>(string_serializer);
-    EXPECT_EQ(received.entity(), message.entity());
+    rcvr->wait_for(std::chrono::milliseconds(10));
   }
+  EXPECT_EQ(num_calls, MAX_ITERS);
 }
 
 TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
@@ -197,9 +229,19 @@ TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
       .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
       .key_file = std::filesystem::path(CERTS_PATH) / "private/receiver.key"};
 
+  SimpleString message(string_serializer);
+  auto event_handler = std::make_shared<ThreadPool>(1);
+  size_t num_calls = 0;
+  auto message_cb = [message, &num_calls](SimpleString const& received) {
+    EXPECT_EQ(received.entity(), message.entity());
+    num_calls++;
+    BOOST_LOG_TRIVIAL(debug)
+        << "Received message: \"" << received.entity() << "\"";
+  };
   auto rcvr_strategy = std::make_shared<siotrns::TlsReceiveStrategy>(
       io_ctx_, rcvr_tls_config, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver>(rcvr_strategy);
+  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
+      rcvr_strategy, string_serializer, event_handler, message_cb);
 
   siotrns::TlsConfig sndr_tls_config{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
@@ -210,13 +252,11 @@ TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
       io_ctx_, sndr_tls_config, rcvr_endpoint);
   auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
 
-  auto message = SimpleString(string_serializer);
-
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
-    auto received = rcvr->extract_message<SimpleString>(string_serializer);
-    EXPECT_EQ(received.entity(), message.entity());
+    rcvr->wait_for(std::chrono::milliseconds(10));
   }
+  EXPECT_EQ(num_calls, MAX_ITERS);
 }
 
 // NOLINTBEGIN [bugprone-exception-escape]

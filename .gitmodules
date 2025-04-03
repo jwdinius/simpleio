@@ -1,4 +1,0 @@
-[submodule "submodules/ThreadPool"]
-	path = submodules/ThreadPool
-	url = git@github.com:jwdinius/ThreadPool.git
-	branch = add-cmake-support

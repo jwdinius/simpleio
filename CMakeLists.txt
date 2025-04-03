@@ -25,9 +25,6 @@ add_library(${PROJECT_NAME}::messages::json ALIAS messages_json)
 add_library(transports_ip SHARED)
 add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
 
-# Build the submodules
-add_subdirectory(submodules/ThreadPool)
-
 add_subdirectory(include)
 add_subdirectory(src)
 add_subdirectory(tests)

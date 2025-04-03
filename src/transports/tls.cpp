@@ -165,7 +165,7 @@ void siotrns::TlsReceiveStrategy::start_receiving(
           BOOST_LOG_TRIVIAL(debug)
               << "Received " << bytes_recvd << " bytes securely.";
           buffer->resize(bytes_recvd);
-          this->event_cb_(std::move(*buffer));
+          this->event_cb_(*buffer);
           start_receiving(socket);
         } else {
           BOOST_LOG_TRIVIAL(error)

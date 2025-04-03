@@ -40,16 +40,32 @@ class AsyncQueue {
   }
 
   /// @brief Wait for and pop a message from the queue.
-  /// @return T, the popped message.
-  T wait_and_pop() {
+  /// @return std::optional<T>, the popped message if the queue is not empty and
+  ///         the queue has not been shutdown.
+  std::optional<T> wait_and_pop() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return !queue_.empty(); });
+    cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
+    if (shutdown_) {
+      return std::nullopt;
+    }
     T value = std::move(queue_.front());
     queue_.pop();
     return value;
   }
 
+  /// @brief Shutdown the queue.
+  /// @details This function signals the queue to shut down, allowing any
+  ///          waiting threads to exit.
+  void shutdown() {
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      shutdown_ = true;
+    }
+    cv_.notify_all();
+  }
+
  private:
+  bool shutdown_{false};
   std::queue<T> queue_;
   std::mutex mutex_;
   std::condition_variable cv_;

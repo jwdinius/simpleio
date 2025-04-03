@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "ThreadPool.h"
 #include "simpleio/async_queue.hpp"
 #include "simpleio/message.hpp"
 
@@ -104,35 +103,20 @@ class Receiver {
       std::shared_ptr<ReceiveStrategy> strategy,
       std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
           serializer,
-      std::shared_ptr<ThreadPool> event_handler,
-      std::function<void(MessageT const&)> const& message_cb)
+      std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue)
       : strategy_(std::move(strategy)),
         serializer_(std::move(serializer)),
-        event_handler_(std::move(event_handler)) {
-    strategy_->set_event_callback(
-        [this, message_cb](std::vector<std::byte> const& blob) {
-          auto message = MessageT(blob, serializer_);
-          futures_.push(event_handler_->enqueue(
-              [message, message_cb] { return message_cb(message); }));
-        });
-  }
-
-  void wait_for(std::chrono::milliseconds const& period) {
-    std::this_thread::sleep_for(period);
-    if (!futures_.empty()) {
-      auto& future = futures_.front();
-      if (future.valid()) {
-        future.get();
-      }
-      futures_.pop();
-    }
+        event_queue_(std::move(event_queue)) {
+    strategy_->set_event_callback([this](std::vector<std::byte> const& blob) {
+      auto message = MessageT(blob, serializer_);
+      event_queue_->push(message);
+    });
   }
 
  private:
   std::shared_ptr<ReceiveStrategy> strategy_;
   std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
       serializer_;
-  std::shared_ptr<ThreadPool> event_handler_;
-  std::queue<std::future<void>> futures_;
+  std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue_;
 };
 }  // namespace simpleio

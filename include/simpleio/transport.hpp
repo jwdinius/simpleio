@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -68,22 +69,29 @@ class Sender {
 ///          over a system interface (e.g., network, serial, etc.).
 class ReceiveStrategy {
  public:
-  /// @brief Default constructor deleted.
   ReceiveStrategy() = default;
 
   /// @brief Declare default destructor to allow inheritance.
   virtual ~ReceiveStrategy() = default;
 
+  void set_event_callback(
+      std::function<void(std::vector<std::byte> const&)> const& event_cb) {
+    event_cb_ = event_cb;
+  }
+
   /// @brief Grant Receiver access to the blob queue to unpack messages.
-  friend class Receiver;
+  // friend class Receiver;
 
  protected:
-  AsyncQueue<std::vector<std::byte>> blob_queue_;
+  std::function<void(std::vector<std::byte> const&)> event_cb_;
+
+  // AsyncQueue<std::vector<std::byte>> ;
 };
 
 /// @brief Message receiver
 /// @details This class is responsible for receiving messages of type MessageT
 ///          using a ReceiveStrategy object.
+template <typename MessageT>
 class Receiver {
  public:
   /// @brief Default constructor deleted.
@@ -91,20 +99,24 @@ class Receiver {
 
   /// @brief Construct from a ReceiveStrategy object.
   /// @param strategy, the ReceiveStrategy object to use.
-  explicit Receiver(std::shared_ptr<ReceiveStrategy> strategy)
-      : strategy_(std::move(strategy)) {}
-
-  /// @brief Extract a message from the receive queue.
-  /// @return MessageT, the extracted message.
-  template <typename MessageT>
-  MessageT extract_message(
+  explicit Receiver(
+      std::shared_ptr<ReceiveStrategy> strategy,
       std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
-          serializer) {
-    return MessageT(std::move(strategy_->blob_queue_.wait_and_pop()),
-                    serializer);
+          serializer,
+      std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue)
+      : strategy_(std::move(strategy)),
+        serializer_(std::move(serializer)),
+        event_queue_(std::move(event_queue)) {
+    strategy_->set_event_callback([this](std::vector<std::byte> const& blob) {
+      auto message = MessageT(blob, serializer_);
+      event_queue_->push(message);
+    });
   }
 
  private:
   std::shared_ptr<ReceiveStrategy> strategy_;
+  std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
+      serializer_;
+  std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue_;
 };
 }  // namespace simpleio

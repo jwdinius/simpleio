@@ -6,7 +6,7 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports {
+namespace simpleio::transports::ip {
 
 /// @brief Strategy for asynchronously sending messages over UDP
 ///        (User Datagram Protocol).
@@ -64,4 +64,4 @@ class UdpReceiveStrategy : public ReceiveStrategy {
   boost::asio::ip::udp::socket socket_;
   size_t const max_blob_size_;
 };
-}  // namespace simpleio::transports
+}  // namespace simpleio::transports::ip

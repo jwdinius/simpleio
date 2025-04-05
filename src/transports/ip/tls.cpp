@@ -1,6 +1,6 @@
 // Copyright (c) 2025, Joe Dinius, Ph.D.
 // SPDX-License-Identifier: Apache-2.0
-#include "simpleio/transports/tls.hpp"
+#include "simpleio/transports/ip/tls.hpp"
 
 #include <boost/log/trivial.hpp>
 #include <memory>
@@ -12,9 +12,9 @@
 namespace sio = simpleio;
 namespace siotrns = simpleio::transports;
 
-siotrns::TlsSendStrategy::TlsSendStrategy(
+siotrns::ip::TlsSendStrategy::TlsSendStrategy(
     std::shared_ptr<boost::asio::io_context> io_ctx,
-    siotrns::TlsConfig const& tls_config,
+    siotrns::ip::TlsConfig const& tls_config,
     boost::asio::ip::tcp::endpoint remote_endpoint)
     : io_ctx_(std::move(io_ctx)),
       remote_endpoint_(std::move(remote_endpoint)),
@@ -35,7 +35,7 @@ siotrns::TlsSendStrategy::TlsSendStrategy(
   }
 }
 
-void siotrns::TlsSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::TlsSendStrategy::send(std::vector<std::byte> const& blob) {
   connect();
   boost::asio::async_write(
       *socket_, boost::asio::buffer(blob),
@@ -51,7 +51,7 @@ void siotrns::TlsSendStrategy::send(std::vector<std::byte> const& blob) {
   close();
 }
 
-void siotrns::TlsSendStrategy::connect() {
+void siotrns::ip::TlsSendStrategy::connect() {
   BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
   // Reset the socket to reuse the existing SSL context
   socket_ =
@@ -79,7 +79,7 @@ void siotrns::TlsSendStrategy::connect() {
   BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
 }
 
-void siotrns::TlsSendStrategy::close() {
+void siotrns::ip::TlsSendStrategy::close() {
   BOOST_LOG_TRIVIAL(debug) << "Closing connection to " << remote_endpoint_;
   boost::system::error_code err_code;
   socket_->shutdown(err_code);
@@ -87,7 +87,7 @@ void siotrns::TlsSendStrategy::close() {
   BOOST_LOG_TRIVIAL(debug) << "Closed connection to " << remote_endpoint_;
 }
 
-siotrns::TlsReceiveStrategy::TlsReceiveStrategy(
+siotrns::ip::TlsReceiveStrategy::TlsReceiveStrategy(
     std::shared_ptr<boost::asio::io_context> const& io_ctx,
     TlsConfig const& tls_config,
     boost::asio::ip::tcp::endpoint const& local_endpoint,
@@ -110,7 +110,7 @@ siotrns::TlsReceiveStrategy::TlsReceiveStrategy(
   start_accepting();
 }
 
-siotrns::TlsReceiveStrategy::~TlsReceiveStrategy() {
+siotrns::ip::TlsReceiveStrategy::~TlsReceiveStrategy() {
   try {
     acceptor_.close();
   } catch (std::exception const& e) {
@@ -118,7 +118,7 @@ siotrns::TlsReceiveStrategy::~TlsReceiveStrategy() {
   }
 }
 
-void siotrns::TlsReceiveStrategy::start_accepting() {
+void siotrns::ip::TlsReceiveStrategy::start_accepting() {
   auto socket =
       std::make_shared<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(
           acceptor_.get_executor(), ssl_ctx_);
@@ -136,7 +136,7 @@ void siotrns::TlsReceiveStrategy::start_accepting() {
       });
 }
 
-void siotrns::TlsReceiveStrategy::start_handshake(
+void siotrns::ip::TlsReceiveStrategy::start_handshake(
     std::shared_ptr<
         boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> const& socket) {
   socket->async_handshake(
@@ -152,7 +152,7 @@ void siotrns::TlsReceiveStrategy::start_handshake(
       });
 }
 
-void siotrns::TlsReceiveStrategy::start_receiving(
+void siotrns::ip::TlsReceiveStrategy::start_receiving(
     std::shared_ptr<
         boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> const& socket) {
   auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);

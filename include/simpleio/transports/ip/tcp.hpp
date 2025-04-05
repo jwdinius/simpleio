@@ -6,7 +6,7 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports {
+namespace simpleio::transports::ip {
 
 /// @brief Strategy for sending messages over TCP
 class TcpSendStrategy : public SendStrategy {
@@ -54,4 +54,4 @@ class TcpReceiveStrategy : public ReceiveStrategy {
   size_t const max_blob_size_;
 };
 
-}  // namespace simpleio::transports
+}  // namespace simpleio::transports::ip

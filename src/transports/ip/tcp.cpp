@@ -1,6 +1,6 @@
 // Copyright (c) 2025, Joe Dinius, Ph.D.
 // SPDX-License-Identifier: Apache-2.0
-#include "simpleio/transports/tcp.hpp"
+#include "simpleio/transports/ip/tcp.hpp"
 
 #include <boost/log/trivial.hpp>
 #include <memory>
@@ -9,12 +9,12 @@
 namespace sio = simpleio;
 namespace siotrns = simpleio::transports;
 
-siotrns::TcpSendStrategy::TcpSendStrategy(
+siotrns::ip::TcpSendStrategy::TcpSendStrategy(
     std::shared_ptr<boost::asio::io_context> const& io_ctx,
     boost::asio::ip::tcp::endpoint remote_endpoint)
     : socket_(*io_ctx), remote_endpoint_(std::move(remote_endpoint)) {}
 
-void siotrns::TcpSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::TcpSendStrategy::send(std::vector<std::byte> const& blob) {
   connect();
   boost::asio::async_write(
       socket_, boost::asio::buffer(blob),
@@ -30,7 +30,7 @@ void siotrns::TcpSendStrategy::send(std::vector<std::byte> const& blob) {
   socket_.close();
 }
 
-void siotrns::TcpSendStrategy::connect() {
+void siotrns::ip::TcpSendStrategy::connect() {
   BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
   boost::system::error_code err_code;
   socket_.connect(remote_endpoint_, err_code);
@@ -42,7 +42,7 @@ void siotrns::TcpSendStrategy::connect() {
   BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
 }
 
-siotrns::TcpReceiveStrategy::TcpReceiveStrategy(
+siotrns::ip::TcpReceiveStrategy::TcpReceiveStrategy(
     std::shared_ptr<boost::asio::io_context> const& io_ctx,
     boost::asio::ip::tcp::endpoint const& local_endpoint,
     size_t const& max_blob_size)
@@ -50,7 +50,7 @@ siotrns::TcpReceiveStrategy::TcpReceiveStrategy(
   start_accepting();
 }
 
-siotrns::TcpReceiveStrategy::~TcpReceiveStrategy() {
+siotrns::ip::TcpReceiveStrategy::~TcpReceiveStrategy() {
   try {
     acceptor_.close();
   } catch (std::exception const& e) {
@@ -58,7 +58,7 @@ siotrns::TcpReceiveStrategy::~TcpReceiveStrategy() {
   }
 }
 
-void siotrns::TcpReceiveStrategy::start_accepting() {
+void siotrns::ip::TcpReceiveStrategy::start_accepting() {
   auto socket =
       std::make_shared<boost::asio::ip::tcp::socket>(acceptor_.get_executor());
   acceptor_.async_accept(
@@ -74,7 +74,7 @@ void siotrns::TcpReceiveStrategy::start_accepting() {
       });
 }
 
-void siotrns::TcpReceiveStrategy::start_receiving(
+void siotrns::ip::TcpReceiveStrategy::start_receiving(
     std::shared_ptr<boost::asio::ip::tcp::socket> const& socket) {
   auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
 

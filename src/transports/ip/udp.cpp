@@ -1,6 +1,6 @@
 // Copyright (c) 2025, Joe Dinius, Ph.D.
 // SPDX-License-Identifier: Apache-2.0
-#include "simpleio/transports/udp.hpp"
+#include "simpleio/transports/ip/udp.hpp"
 
 #include <boost/log/trivial.hpp>
 #include <memory>
@@ -11,7 +11,7 @@ namespace ba = boost::asio;
 namespace sio = simpleio;
 namespace siotrns = simpleio::transports;
 
-siotrns::UdpSendStrategy::UdpSendStrategy(
+siotrns::ip::UdpSendStrategy::UdpSendStrategy(
     std::shared_ptr<ba::ip::udp::socket> socket,
     ba::ip::udp::endpoint remote_endpoint)
     : socket_(std::move(socket)), remote_endpoint_(std::move(remote_endpoint)) {
@@ -24,7 +24,7 @@ siotrns::UdpSendStrategy::UdpSendStrategy(
                            << " Local endpoint: " << socket_->local_endpoint();
 }
 
-siotrns::UdpSendStrategy::UdpSendStrategy(
+siotrns::ip::UdpSendStrategy::UdpSendStrategy(
     std::shared_ptr<ba::ip::udp::socket> socket,
     ba::ip::udp::endpoint remote_endpoint,
     std::shared_ptr<ba::strand<ba::io_context::executor_type>> strand)
@@ -40,7 +40,7 @@ siotrns::UdpSendStrategy::UdpSendStrategy(
                            << " Local endpoint: " << socket_->local_endpoint();
 }
 
-siotrns::UdpSendStrategy::~UdpSendStrategy() {
+siotrns::ip::UdpSendStrategy::~UdpSendStrategy() {
   try {
     if (socket_->is_open()) {
       socket_->close();
@@ -50,7 +50,7 @@ siotrns::UdpSendStrategy::~UdpSendStrategy() {
   }
 }
 
-void siotrns::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
   auto send_fn = [this](boost::system::error_code err_code,
                         std::size_t bytes_sent) {
     if (!err_code) {
@@ -70,7 +70,7 @@ void siotrns::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
   socket_->async_send_to(ba::buffer(blob), remote_endpoint_, send_fn);
 }
 
-siotrns::UdpReceiveStrategy::UdpReceiveStrategy(
+siotrns::ip::UdpReceiveStrategy::UdpReceiveStrategy(
     std::shared_ptr<ba::io_context> const& io_ctx,
     ba::ip::udp::endpoint const& local_endpoint, size_t const& max_blob_size)
     : socket_(*io_ctx, local_endpoint), max_blob_size_(max_blob_size) {
@@ -78,7 +78,7 @@ siotrns::UdpReceiveStrategy::UdpReceiveStrategy(
   start_receiving();
 }
 
-siotrns::UdpReceiveStrategy::~UdpReceiveStrategy() {
+siotrns::ip::UdpReceiveStrategy::~UdpReceiveStrategy() {
   try {
     socket_.close();
   } catch (std::exception const& e) {
@@ -86,7 +86,7 @@ siotrns::UdpReceiveStrategy::~UdpReceiveStrategy() {
   }
 }
 
-void siotrns::UdpReceiveStrategy::start_receiving() {
+void siotrns::ip::UdpReceiveStrategy::start_receiving() {
   auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
   auto remote_endpoint = std::make_shared<ba::ip::udp::endpoint>();
 

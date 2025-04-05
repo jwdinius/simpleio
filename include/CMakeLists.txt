@@ -43,9 +43,9 @@ target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
-      simpleio/transports/tcp.hpp
-      simpleio/transports/tls.hpp
-      simpleio/transports/udp.hpp
+      simpleio/transports/ip/tcp.hpp
+      simpleio/transports/ip/tls.hpp
+      simpleio/transports/ip/udp.hpp
 )
 
 target_link_libraries(transports_ip

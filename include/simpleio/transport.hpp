@@ -11,6 +11,7 @@
 
 #include "simpleio/async_queue.hpp"
 #include "simpleio/message.hpp"
+#include "simpleio/worker.hpp"
 
 namespace simpleio {
 
@@ -84,8 +85,6 @@ class ReceiveStrategy {
 
  protected:
   std::function<void(std::vector<std::byte> const&)> event_cb_;
-
-  // AsyncQueue<std::vector<std::byte>> ;
 };
 
 /// @brief Message receiver
@@ -103,14 +102,22 @@ class Receiver {
       std::shared_ptr<ReceiveStrategy> strategy,
       std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
           serializer,
-      std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue)
+      std::function<void(MessageT const&)> message_cb)
       : strategy_(std::move(strategy)),
         serializer_(std::move(serializer)),
-        event_queue_(std::move(event_queue)) {
+        event_queue_(std::make_shared<simpleio::AsyncQueue<MessageT>>()) {
     strategy_->set_event_callback([this](std::vector<std::byte> const& blob) {
       auto message = MessageT(blob, serializer_);
       event_queue_->push(message);
     });
+    worker_ = std::make_unique<Worker<MessageT>>(event_queue_, message_cb);
+  }
+
+  /// @brief Destructor for the Receiver class.
+  /// @details This destructor shuts down the worker thread and cleans up
+  ///          resources.
+  ~Receiver() {
+    worker_->shutdown();
   }
 
  private:
@@ -118,5 +125,6 @@ class Receiver {
   std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
       serializer_;
   std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue_;
+  std::unique_ptr<Worker<MessageT>> worker_;
 };
 }  // namespace simpleio

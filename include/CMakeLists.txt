@@ -5,6 +5,7 @@ target_sources(base
       simpleio/async_queue.hpp
       simpleio/message.hpp
       simpleio/transport.hpp
+      simpleio/worker.hpp
 )
 
 target_link_libraries(base

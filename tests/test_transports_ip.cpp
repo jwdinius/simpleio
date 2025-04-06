@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "certs_path.h"  // NOLINT [build/include_subdir]
+#include "simpleio/transports/ip/ip.hpp"
 #include "simpleio/transports/ip/tcp.hpp"
 #include "simpleio/transports/ip/tls.hpp"
 #include "simpleio/transports/ip/udp.hpp"
@@ -36,9 +37,7 @@ void init_logger() {
                                 blog::trivial::debug);
 }
 
-// NOLINTBEGIN[modernize-avoid-c-arrays]
-static constexpr char TEST_IPV4_ADDR[] = "127.0.0.1";
-// NOLINTEND[modernize-avoid-c-arrays]
+static constexpr const char* TEST_IPV4_ADDR = "127.0.0.1";
 static constexpr uint16_t TEST_PORT_NUM = 12345;
 static constexpr size_t MAX_ITERS = 10;
 
@@ -70,34 +69,18 @@ class SimpleString : public sio::Message<std::string> {
 
 class TestNetworkTransport : public ::testing::Test {
   void SetUp() override {
-    BOOST_LOG_TRIVIAL(debug) << "Starting io_context thread";
-    // Prevent io_context from exiting when idle
-    work_guard_ = std::make_unique<
-        asio::executor_work_guard<asio::io_context::executor_type>>(
-        io_ctx_->get_executor());
-
-    io_thread_ = std::thread([this] {
-      BOOST_LOG_TRIVIAL(debug) << "io_context running...";
-      io_ctx_->run();
-      BOOST_LOG_TRIVIAL(debug) << "io_context stopped.";
-    });
+    io_worker_ = std::make_unique<siotrns::ip::IoWorker>();
+    io_ctx_ = io_worker_->get_task_scheduler();
   }
 
   void TearDown() override {
-    work_guard_.reset();
-    io_ctx_->stop();
-    if (io_thread_.joinable()) {
-      io_thread_.join();
-    }
+    io_worker_.reset();
+    io_ctx_.reset();
   }
 
  protected:
-  std::shared_ptr<asio::io_context> const io_ctx_{
-      std::make_shared<asio::io_context>()};
-  std::thread io_thread_;
-  std::unique_ptr<
-      asio::executor_work_guard<boost::asio::io_context::executor_type>>
-      work_guard_;
+  std::unique_ptr<siotrns::ip::IoWorker> io_worker_;
+  std::shared_ptr<siotrns::ip::detail::TaskSchedulerImpl> io_ctx_;
 };
 
 TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {

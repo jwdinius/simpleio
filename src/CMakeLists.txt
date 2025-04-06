@@ -10,6 +10,7 @@ target_sources(messages_json
 
 target_sources(transports_ip
   PRIVATE
+    transports/ip/ip.cpp
     transports/ip/tcp.cpp
     transports/ip/tls.cpp
     transports/ip/udp.cpp

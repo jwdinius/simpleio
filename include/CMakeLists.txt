@@ -43,7 +43,6 @@ target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
-      simpleio/transports/ip/detail/ip_impl.hpp
       simpleio/transports/ip/ip.hpp
       simpleio/transports/ip/tcp.hpp
       simpleio/transports/ip/tls.hpp

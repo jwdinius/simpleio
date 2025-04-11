@@ -18,16 +18,6 @@ class UdpSendStrategy : public SendStrategy {
   explicit UdpSendStrategy(std::shared_ptr<boost::asio::ip::udp::socket> socket,
                            boost::asio::ip::udp::endpoint remote_endpoint);
 
-  /// @brief Construct from an io_context and a remote endpoint.
-  /// @param socket, the (possibly shared) socket to use.
-  /// @param remote_endpoint, the remote endpoint to send to.
-  explicit UdpSendStrategy(
-      std::shared_ptr<boost::asio::ip::udp::socket> socket,
-      boost::asio::ip::udp::endpoint remote_endpoint,
-      std::shared_ptr<
-          boost::asio::strand<boost::asio::io_context::executor_type>>
-          strand);
-
   ~UdpSendStrategy() override;
 
   /// @brief Send a byte vector.
@@ -37,8 +27,6 @@ class UdpSendStrategy : public SendStrategy {
  private:
   std::shared_ptr<boost::asio::ip::udp::socket> socket_;
   boost::asio::ip::udp::endpoint const remote_endpoint_;
-  std::shared_ptr<boost::asio::strand<boost::asio::io_context::executor_type>>
-      strand_;
 };
 
 /// @brief Strategy for asynchronously receiving messages of templated type

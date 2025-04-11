@@ -19,9 +19,6 @@
 
 #include "certs_path.h"  // NOLINT [build/include_subdir]
 #include "simpleio/transports/ip/ip.hpp"
-#include "simpleio/transports/ip/tcp.hpp"
-#include "simpleio/transports/ip/tls.hpp"
-#include "simpleio/transports/ip/udp.hpp"
 
 namespace asio = boost::asio;
 namespace blog = boost::log;
@@ -69,25 +66,18 @@ class SimpleString : public sio::Message<std::string> {
 
 class TestNetworkTransport : public ::testing::Test {
   void SetUp() override {
-    io_worker_ = std::make_unique<siotrns::ip::IoWorker>();
-    io_ctx_ = io_worker_->get_task_scheduler();
+    io_worker_ = std::make_shared<siotrns::ip::IoWorker>();
   }
 
   void TearDown() override {
     io_worker_.reset();
-    io_ctx_.reset();
   }
 
  protected:
-  std::unique_ptr<siotrns::ip::IoWorker> io_worker_;
-  std::shared_ptr<siotrns::ip::detail::TaskSchedulerImpl> io_ctx_;
+  std::shared_ptr<siotrns::ip::IoWorker> io_worker_;
 };
 
 TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::udp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
-
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
   SimpleString message(string_serializer);
@@ -105,15 +95,11 @@ TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
     }
   };
 
-  auto rcvr_strategy = std::make_shared<siotrns::ip::UdpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
-
-  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
-  auto sndr_strategy = std::make_shared<siotrns::ip::UdpSendStrategy>(
-      shared_socket, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
+  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
+      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM,
+      message_cb);
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
@@ -126,10 +112,6 @@ TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
 }
 
 TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::udp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
-
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
   SimpleString message(string_serializer);
@@ -146,21 +128,14 @@ TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
       cv.notify_one();
     }
   };
-  auto rcvr_strategy = std::make_shared<siotrns::ip::UdpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
 
-  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
-  auto shared_strand =
-      std::make_shared<asio::strand<asio::io_context::executor_type>>(
-          io_ctx_->get_executor());
-  auto sndr1_strategy = std::make_shared<siotrns::ip::UdpSendStrategy>(
-      shared_socket, rcvr_endpoint, shared_strand);
-  auto sndr2_strategy = std::make_shared<siotrns::ip::UdpSendStrategy>(
-      shared_socket, rcvr_endpoint, shared_strand);
-  auto sndr1 = std::make_shared<sio::Sender<SimpleString>>(sndr1_strategy);
-  auto sndr2 = std::make_shared<sio::Sender<SimpleString>>(sndr2_strategy);
+  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
+      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM,
+      message_cb);
+  auto sndr1 = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
+  auto sndr2 = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr1->send(message);
@@ -174,10 +149,6 @@ TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
 }
 
 TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::tcp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
-
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
 
   SimpleString message(string_serializer);
@@ -195,14 +166,11 @@ TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
     }
   };
 
-  auto rcvr_strategy = std::make_shared<siotrns::ip::TcpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
-
-  auto sndr_strategy =
-      std::make_shared<siotrns::ip::TcpSendStrategy>(io_ctx_, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
+  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
+      io_worker_, siotrns::ip::Scheme::TCP, TEST_IPV4_ADDR, TEST_PORT_NUM,
+      message_cb);
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, TEST_IPV4_ADDR, TEST_PORT_NUM);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
@@ -215,16 +183,7 @@ TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
 }
 
 TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::tcp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
-
   auto string_serializer = std::make_shared<SimpleStringSerializer>();
-
-  siotrns::ip::TlsConfig rcvr_tls_config{
-      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
-      .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
-      .key_file = std::filesystem::path(CERTS_PATH) / "private/receiver.key"};
 
   SimpleString message(string_serializer);
   size_t num_calls = 0;
@@ -241,19 +200,21 @@ TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
     }
   };
 
-  auto rcvr_strategy = std::make_shared<siotrns::ip::TlsReceiveStrategy>(
-      io_ctx_, rcvr_tls_config, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
+  siotrns::ip::TlsConfig rcvr_tls_config{
+      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+      .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
+      .key_file = std::filesystem::path(CERTS_PATH) / "private/receiver.key"};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
+      io_worker_, siotrns::ip::Scheme::TLS, TEST_IPV4_ADDR, TEST_PORT_NUM,
+      message_cb, rcvr_tls_config);
 
   siotrns::ip::TlsConfig sndr_tls_config{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
       .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
       .key_file = std::filesystem::path(CERTS_PATH) / "private/sender.key"};
-
-  auto sndr_strategy = std::make_shared<siotrns::ip::TlsSendStrategy>(
-      io_ctx_, sndr_tls_config, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, TEST_IPV4_ADDR, TEST_PORT_NUM,
+      sndr_tls_config);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);

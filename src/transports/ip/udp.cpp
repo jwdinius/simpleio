@@ -24,22 +24,6 @@ siotrns::ip::UdpSendStrategy::UdpSendStrategy(
                            << " Local endpoint: " << socket_->local_endpoint();
 }
 
-siotrns::ip::UdpSendStrategy::UdpSendStrategy(
-    std::shared_ptr<ba::ip::udp::socket> socket,
-    ba::ip::udp::endpoint remote_endpoint,
-    std::shared_ptr<ba::strand<ba::io_context::executor_type>> strand)
-    : socket_(std::move(socket)),
-      remote_endpoint_(std::move(remote_endpoint)),
-      strand_(std::move(strand)) {
-  BOOST_LOG_TRIVIAL(debug) << "Configuring the socket to send to "
-                           << remote_endpoint_;
-  if (!socket_->is_open()) {
-    socket_->open(remote_endpoint_.protocol());
-  }
-  BOOST_LOG_TRIVIAL(debug) << "Socket is open? " << socket_->is_open()
-                           << " Local endpoint: " << socket_->local_endpoint();
-}
-
 siotrns::ip::UdpSendStrategy::~UdpSendStrategy() {
   try {
     if (socket_->is_open()) {
@@ -60,13 +44,6 @@ void siotrns::ip::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
       BOOST_LOG_TRIVIAL(error) << "Error sending data: " << err_code.message();
     }
   };
-  if (strand_) {
-    // Use the strand to ensure the shared socket is accessed in a thread-safe
-    // manner
-    socket_->async_send_to(ba::buffer(blob), remote_endpoint_,
-                           ba::bind_executor(*strand_, send_fn));
-    return;
-  }
   socket_->async_send_to(ba::buffer(blob), remote_endpoint_, send_fn);
 }
 

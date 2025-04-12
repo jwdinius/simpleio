@@ -95,11 +95,15 @@ TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
     }
   };
 
-  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
-      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM,
-      message_cb);
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, string_serializer, message_cb,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
+      io_worker_, siotrns::ip::Scheme::UDP, sndr_opts);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
@@ -129,13 +133,18 @@ TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
     }
   };
 
-  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
-      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM,
-      message_cb);
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, string_serializer, message_cb,
+      rcvr_opts);
+
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
   auto sndr1 = siotrns::ip::make_sender<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
+      io_worker_, siotrns::ip::Scheme::UDP, sndr_opts);
   auto sndr2 = siotrns::ip::make_sender<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP, TEST_IPV4_ADDR, TEST_PORT_NUM);
+      io_worker_, siotrns::ip::Scheme::UDP, sndr_opts);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr1->send(message);
@@ -166,11 +175,16 @@ TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
     }
   };
 
-  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
-      io_worker_, siotrns::ip::Scheme::TCP, TEST_IPV4_ADDR, TEST_PORT_NUM,
-      message_cb);
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, string_serializer, message_cb,
+      rcvr_opts);
+
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TCP, TEST_IPV4_ADDR, TEST_PORT_NUM);
+      io_worker_, siotrns::ip::Scheme::TCP, sndr_opts);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);
@@ -200,21 +214,28 @@ TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
     }
   };
 
-  siotrns::ip::TlsConfig rcvr_tls_config{
-      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
-      .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
-      .key_file = std::filesystem::path(CERTS_PATH) / "private/receiver.key"};
-  auto rcvr = siotrns::ip::make_receiver<SimpleString, SimpleStringSerializer>(
-      io_worker_, siotrns::ip::Scheme::TLS, TEST_IPV4_ADDR, TEST_PORT_NUM,
-      message_cb, rcvr_tls_config);
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV4_ADDR,
+      .local_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/receiver.key"}};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, string_serializer, message_cb,
+      rcvr_opts);
 
-  siotrns::ip::TlsConfig sndr_tls_config{
-      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
-      .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
-      .key_file = std::filesystem::path(CERTS_PATH) / "private/sender.key"};
+  auto sndr_opts = siotrns::ip::SenderOptions{
+      .remote_ip = TEST_IPV4_ADDR,
+      .remote_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/sender.key"}};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TLS, TEST_IPV4_ADDR, TEST_PORT_NUM,
-      sndr_tls_config);
+      io_worker_, siotrns::ip::Scheme::TLS, sndr_opts);
 
   for (int i = 0; i < MAX_ITERS; i++) {
     sndr->send(message);

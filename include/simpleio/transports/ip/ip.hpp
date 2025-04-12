@@ -5,6 +5,7 @@
 #include <boost/log/trivial.hpp>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -16,7 +17,14 @@
 namespace simpleio::transports::ip {
 
 /// @brief Enumeration of transport schemes.
-enum class Scheme { TCP, TLS, UDP, UDP_BROADCAST, UDP_WRITE_ONLY };
+enum class Scheme {
+  TCP,
+  TLS,
+  UDP,
+  UDP_BROADCAST,
+  UDP_MULTICAST,
+  UDP_WRITE_ONLY
+};
 
 /// @brief IO worker.
 class IoWorker {
@@ -43,35 +51,45 @@ class IoWorker {
   std::thread worker_;
 };
 
+struct SenderOptions {
+  std::string remote_ip;
+  uint16_t remote_port;
+  std::optional<TlsConfig> tls_config;
+};
+
 // NOLINTBEGIN [build/namespaces]
 template <typename MessageT>
 std::shared_ptr<Sender<MessageT>> make_sender(
     std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
-    std::string const& remote_ip, uint16_t const& remote_port,
-    TlsConfig const& tls_config = {}) {
+    SenderOptions const& options) {
   // NOLINTEND [build/namespaces]
   switch (scheme) {
     case Scheme::TCP: {
       auto sndr_strategy = std::make_shared<TcpSendStrategy>(
           io_wrkr->get_task_scheduler(),
           boost::asio::ip::tcp::endpoint(
-              boost::asio::ip::address::from_string(remote_ip), remote_port));
+              boost::asio::ip::address::from_string(options.remote_ip),
+              options.remote_port));
       return std::make_shared<Sender<MessageT>>(sndr_strategy);
     }
     case Scheme::TLS: {
+      if (!options.tls_config) {
+        throw TransportException("TLS config is required for TLS scheme");
+      }
       auto tls_sndr_strategy = std::make_shared<TlsSendStrategy>(
-          io_wrkr->get_task_scheduler(), tls_config,
+          io_wrkr->get_task_scheduler(), options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
-              boost::asio::ip::address::from_string(remote_ip), remote_port));
+              boost::asio::ip::address::from_string(options.remote_ip),
+              options.remote_port));
       return std::make_shared<Sender<MessageT>>(tls_sndr_strategy);
     }
     case Scheme::UDP: {
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(
           *(io_wrkr->get_task_scheduler()));
       auto udp_sndr_strategy = std::make_shared<UdpSendStrategy>(
-          socket,
-          boost::asio::ip::udp::endpoint(
-              boost::asio::ip::address::from_string(remote_ip), remote_port));
+          socket, boost::asio::ip::udp::endpoint(
+                      boost::asio::ip::address::from_string(options.remote_ip),
+                      options.remote_port));
       return std::make_shared<Sender<MessageT>>(udp_sndr_strategy);
     }
     default:
@@ -80,30 +98,42 @@ std::shared_ptr<Sender<MessageT>> make_sender(
   }
 }
 
+struct ReceiverOptions {
+  std::string local_ip;
+  uint16_t local_port;
+  std::optional<TlsConfig> tls_config;
+};
+
 // NOLINTBEGIN [build/namespaces]
-template <typename MessageT, typename SerializerT>
+template <typename MessageT>
 std::unique_ptr<Receiver<MessageT>> make_receiver(
     std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
-    std::string const& local_ip, uint16_t const& local_port,
+    std::shared_ptr<
+        SerializationStrategy<typename MessageT::entity_type>> const&
+        serializer,
     std::function<void(MessageT const&)> message_cb,
-    TlsConfig const& tls_config = {}) {
+    ReceiverOptions const& options) {
   // NOLINTEND [build/namespaces]
-  auto serializer = std::make_shared<SerializerT>();
   switch (scheme) {
     case Scheme::TCP: {
       auto strategy = std::make_shared<TcpReceiveStrategy>(
           io_wrkr->get_task_scheduler(),
           boost::asio::ip::tcp::endpoint(
-              boost::asio::ip::address::from_string(local_ip), local_port),
+              boost::asio::ip::address::from_string(options.local_ip),
+              options.local_port),
           MessageT::max_blob_size);
       return std::make_unique<Receiver<MessageT>>(strategy, serializer,
                                                   message_cb);
     }
     case Scheme::TLS: {
+      if (!options.tls_config) {
+        throw TransportException("TLS config is required for TLS scheme");
+      }
       auto strategy = std::make_shared<TlsReceiveStrategy>(
-          io_wrkr->get_task_scheduler(), tls_config,
+          io_wrkr->get_task_scheduler(), options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
-              boost::asio::ip::address::from_string(local_ip), local_port),
+              boost::asio::ip::address::from_string(options.local_ip),
+              options.local_port),
           MessageT::max_blob_size);
       return std::make_unique<Receiver<MessageT>>(strategy, serializer,
                                                   message_cb);
@@ -112,7 +142,8 @@ std::unique_ptr<Receiver<MessageT>> make_receiver(
       auto strategy = std::make_shared<UdpReceiveStrategy>(
           io_wrkr->get_task_scheduler(),
           boost::asio::ip::udp::endpoint(
-              boost::asio::ip::address::from_string(local_ip), local_port),
+              boost::asio::ip::address::from_string(options.local_ip),
+              options.local_port),
           MessageT::max_blob_size);
       return std::make_unique<Receiver<MessageT>>(strategy, serializer,
                                                   message_cb);

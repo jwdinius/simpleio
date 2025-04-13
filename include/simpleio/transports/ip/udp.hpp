@@ -36,11 +36,17 @@ class UdpReceiveStrategy : public ReceiveStrategy {
   /// @brief Construct from an io_context, a local endpoint, and a serializer.
   /// @param io_ctx, the io_context to use.
   /// @param local_endpoint, the local endpoint to listen on.
-  /// @param serializer, the message SerializationStrategy to use for message of
-  /// type MessageType.
+  /// @param max_blob_size, packet frame size (in bytes).
   explicit UdpReceiveStrategy(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::udp::endpoint const& local_endpoint,
+      size_t const& max_blob_size);
+
+  /// @brief Construct from an io_context, a socket, and a serializer.
+  /// @param socket, a configured socket to listen to.
+  /// @param max_blob_size, packet frame size (in bytes).
+  explicit UdpReceiveStrategy(
+      std::unique_ptr<boost::asio::ip::udp::socket> socket,
       size_t const& max_blob_size);
 
   /// @brief Destructor.
@@ -49,7 +55,7 @@ class UdpReceiveStrategy : public ReceiveStrategy {
  private:
   void start_receiving();
 
-  boost::asio::ip::udp::socket socket_;
+  std::unique_ptr<boost::asio::ip::udp::socket> socket_;
   size_t const max_blob_size_;
 };
 }  // namespace simpleio::transports::ip

@@ -50,14 +50,22 @@ void siotrns::ip::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
 siotrns::ip::UdpReceiveStrategy::UdpReceiveStrategy(
     std::shared_ptr<ba::io_context> const& io_ctx,
     ba::ip::udp::endpoint const& local_endpoint, size_t const& max_blob_size)
-    : socket_(*io_ctx, local_endpoint), max_blob_size_(max_blob_size) {
-  BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_.local_endpoint();
+    : max_blob_size_(max_blob_size) {
+  socket_ = std::make_unique<ba::ip::udp::socket>(*io_ctx, local_endpoint);
+  BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
+  start_receiving();
+}
+
+siotrns::ip::UdpReceiveStrategy::UdpReceiveStrategy(
+    std::unique_ptr<ba::ip::udp::socket> socket, size_t const& max_blob_size)
+    : socket_(std::move(socket)), max_blob_size_(max_blob_size) {
+  BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
   start_receiving();
 }
 
 siotrns::ip::UdpReceiveStrategy::~UdpReceiveStrategy() {
   try {
-    socket_.close();
+    socket_->close();
   } catch (std::exception const& e) {
     BOOST_LOG_TRIVIAL(error) << "Exception in destructor: " << e.what();
   }
@@ -67,7 +75,7 @@ void siotrns::ip::UdpReceiveStrategy::start_receiving() {
   auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
   auto remote_endpoint = std::make_shared<ba::ip::udp::endpoint>();
 
-  socket_.async_receive_from(
+  socket_->async_receive_from(
       ba::buffer(*buffer), *remote_endpoint,
       [this, buffer, remote_endpoint](boost::system::error_code err_code,
                                       size_t bytes_recvd) {

@@ -9,7 +9,7 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports {
+namespace simpleio::transports::ip {
 
 /// @brief Configuration for TLS v1.3 transport.
 /// @details This struct holds the paths to the Certificate Authority (CA) file,
@@ -80,4 +80,4 @@ class TlsReceiveStrategy : public ReceiveStrategy {
   size_t const max_blob_size_;
 };
 
-}  // namespace simpleio::transports
+}  // namespace simpleio::transports::ip

@@ -9,6 +9,7 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/utility/setup/console.hpp>
 #include <condition_variable>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -18,10 +19,7 @@
 #include <vector>
 
 #include "certs_path.h"  // NOLINT [build/include_subdir]
-#include "simpleio/async_queue.hpp"
-#include "simpleio/transports/tcp.hpp"
-#include "simpleio/transports/tls.hpp"
-#include "simpleio/transports/udp.hpp"
+#include "simpleio/transports/ip/ip.hpp"
 
 namespace asio = boost::asio;
 namespace blog = boost::log;
@@ -37,9 +35,11 @@ void init_logger() {
                                 blog::trivial::debug);
 }
 
-// NOLINTBEGIN[modernize-avoid-c-arrays]
-static constexpr char TEST_IPV4_ADDR[] = "127.0.0.1";
-// NOLINTEND[modernize-avoid-c-arrays]
+static constexpr const char* TEST_IPV4_ADDR = "127.0.0.1";
+static constexpr const char* TEST_BROADCAST_ADDR = "255.255.255.255";
+static constexpr const char* TEST_IPV4_MULTICAST_ADDR = "239.255.0.1";
+static constexpr const char* TEST_IPV6_ADDR = "::1";
+static constexpr const char* TEST_IPV6_MULTICAST_ADDR = "ff02::1";
 static constexpr uint16_t TEST_PORT_NUM = 12345;
 static constexpr size_t MAX_ITERS = 10;
 
@@ -70,217 +70,239 @@ class SimpleString : public sio::Message<std::string> {
 };
 
 class TestNetworkTransport : public ::testing::Test {
-  void SetUp() override {
-    BOOST_LOG_TRIVIAL(debug) << "Starting io_context thread";
-    // Prevent io_context from exiting when idle
-    work_guard_ = std::make_unique<
-        asio::executor_work_guard<asio::io_context::executor_type>>(
-        io_ctx_->get_executor());
+ public:
+  TestNetworkTransport()
+      : string_serializer_(std::make_shared<SimpleStringSerializer>()),
+        message_(string_serializer_) {
+    BOOST_LOG_TRIVIAL(debug) << "TestNetworkTransport constructor";
 
-    io_thread_ = std::thread([this] {
-      BOOST_LOG_TRIVIAL(debug) << "io_context running...";
-      io_ctx_->run();
-      BOOST_LOG_TRIVIAL(debug) << "io_context stopped.";
-    });
+    /// @brief Callback function to handle received messages.
+    /// @details Check that the received message matches the expected
+    ///          message and increment the call count.
+    message_cb_ = [this](SimpleString const& received) {
+      std::lock_guard lock(mutex_);
+      BOOST_LOG_TRIVIAL(debug)
+          << "Received message: \"" << received.entity() << "\"";
+      EXPECT_EQ(received.entity(), message_.entity());
+      if (++num_calls_ == MAX_ITERS) {
+        cv_.notify_one();
+      }
+    };
+
+    /// @brief Test function to send messages.
+    /// @details Send the message MAX_ITERS times and wait for message_cb_
+    ///          to be called MAX_ITERS times.
+    test_fn_ = [this](std::shared_ptr<sio::Sender<SimpleString>> sndr) {
+      for (int i = 0; i < MAX_ITERS; i++) {
+        sndr->send(message_);
+      }
+      {
+        std::unique_lock lock(mutex_);
+        EXPECT_TRUE(cv_.wait_for(lock, std::chrono::milliseconds(100),
+                                 [this] { return num_calls_ == MAX_ITERS; }));
+      }
+    };
+  }
+
+  void SetUp() override {
+    io_worker_ = std::make_shared<siotrns::ip::IoWorker>();
+    num_calls_ = 0;
   }
 
   void TearDown() override {
-    work_guard_.reset();
-    io_ctx_->stop();
-    if (io_thread_.joinable()) {
-      io_thread_.join();
-    }
+    io_worker_.reset();
   }
 
  protected:
-  std::shared_ptr<asio::io_context> const io_ctx_{
-      std::make_shared<asio::io_context>()};
-  std::thread io_thread_;
-  std::unique_ptr<
-      asio::executor_work_guard<boost::asio::io_context::executor_type>>
-      work_guard_;
+  std::shared_ptr<SimpleStringSerializer> string_serializer_;
+  SimpleString message_;
+  size_t num_calls_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::function<void(SimpleString const&)> message_cb_;
+  std::shared_ptr<siotrns::ip::IoWorker> io_worker_;
+  std::function<void(std::shared_ptr<sio::Sender<SimpleString>>)> test_fn_;
 };
 
-TEST_F(TestNetworkTransport, TestUdpSingleSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::udp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
+/// @brief Test for Scheme::TCP with an IPv4 address
+TEST_F(TestNetworkTransport, TestTcpIPv4) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, sndr_opts);
 
-  auto string_serializer = std::make_shared<SimpleStringSerializer>();
-
-  SimpleString message(string_serializer);
-  size_t num_calls = 0;
-  std::mutex mutex;
-  std::condition_variable cv;
-
-  auto message_cb = [&](SimpleString const& received) {
-    std::lock_guard lock(mutex);
-    BOOST_LOG_TRIVIAL(debug)
-        << "Received message: \"" << received.entity() << "\"";
-    EXPECT_EQ(received.entity(), message.entity());
-    if (++num_calls == MAX_ITERS) {
-      cv.notify_one();
-    }
-  };
-
-  auto rcvr_strategy = std::make_shared<siotrns::UdpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
-
-  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
-  auto sndr_strategy =
-      std::make_shared<siotrns::UdpSendStrategy>(shared_socket, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
-
-  for (int i = 0; i < MAX_ITERS; i++) {
-    sndr->send(message);
-  }
-  {
-    std::unique_lock lock(mutex);
-    EXPECT_TRUE(cv.wait_for(lock, std::chrono::milliseconds(100),
-                            [&] { return num_calls == MAX_ITERS; }));
-  }
+  test_fn_(sndr);
 }
 
-TEST_F(TestNetworkTransport, TestUdpMultipleSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::udp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
+/// @brief Test for Scheme::TCP with an IPv6 address
+TEST_F(TestNetworkTransport, TestTcpIPv6) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TCP, sndr_opts);
 
-  auto string_serializer = std::make_shared<SimpleStringSerializer>();
-
-  SimpleString message(string_serializer);
-  size_t num_calls = 0;
-  std::mutex mutex;
-  std::condition_variable cv;
-
-  auto message_cb = [&](SimpleString const& received) {
-    std::lock_guard lock(mutex);
-    BOOST_LOG_TRIVIAL(debug)
-        << "Received message: \"" << received.entity() << "\"";
-    EXPECT_EQ(received.entity(), message.entity());
-    if (++num_calls == MAX_ITERS) {
-      cv.notify_one();
-    }
-  };
-  auto rcvr_strategy = std::make_shared<siotrns::UdpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
-
-  auto shared_socket = std::make_shared<asio::ip::udp::socket>(*io_ctx_);
-  auto shared_strand =
-      std::make_shared<asio::strand<asio::io_context::executor_type>>(
-          io_ctx_->get_executor());
-  auto sndr1_strategy = std::make_shared<siotrns::UdpSendStrategy>(
-      shared_socket, rcvr_endpoint, shared_strand);
-  auto sndr2_strategy = std::make_shared<siotrns::UdpSendStrategy>(
-      shared_socket, rcvr_endpoint, shared_strand);
-  auto sndr1 = std::make_shared<sio::Sender<SimpleString>>(sndr1_strategy);
-  auto sndr2 = std::make_shared<sio::Sender<SimpleString>>(sndr2_strategy);
-
-  for (int i = 0; i < MAX_ITERS; i++) {
-    sndr1->send(message);
-    sndr2->send(message);
-  }
-  {
-    std::unique_lock lock(mutex);
-    EXPECT_TRUE(cv.wait_for(lock, std::chrono::milliseconds(100),
-                            [&] { return num_calls == 2 * MAX_ITERS; }));
-  }
+  test_fn_(sndr);
 }
 
-TEST_F(TestNetworkTransport, TestTcpSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::tcp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
+/// @brief Test for Scheme::TLS with an IPv4 address
+TEST_F(TestNetworkTransport, TestTlsIPv4) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV4_ADDR,
+      .local_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/receiver.key"}};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{
+      .remote_ip = TEST_IPV4_ADDR,
+      .remote_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/sender.key"}};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, sndr_opts);
 
-  auto string_serializer = std::make_shared<SimpleStringSerializer>();
-
-  SimpleString message(string_serializer);
-  size_t num_calls = 0;
-  std::mutex mutex;
-  std::condition_variable cv;
-
-  auto message_cb = [&](SimpleString const& received) {
-    std::lock_guard lock(mutex);
-    BOOST_LOG_TRIVIAL(debug)
-        << "Received message: \"" << received.entity() << "\"";
-    EXPECT_EQ(received.entity(), message.entity());
-    if (++num_calls == MAX_ITERS) {
-      cv.notify_one();
-    }
-  };
-
-  auto rcvr_strategy = std::make_shared<siotrns::TcpReceiveStrategy>(
-      io_ctx_, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
-
-  auto sndr_strategy =
-      std::make_shared<siotrns::TcpSendStrategy>(io_ctx_, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
-
-  for (int i = 0; i < MAX_ITERS; i++) {
-    sndr->send(message);
-  }
-  {
-    std::unique_lock lock(mutex);
-    EXPECT_TRUE(cv.wait_for(lock, std::chrono::milliseconds(100),
-                            [&] { return num_calls == MAX_ITERS; }));
-  }
+  test_fn_(sndr);
 }
 
-TEST_F(TestNetworkTransport, TestTlsSendAndReceive) {
-  EXPECT_FALSE(io_ctx_->stopped());
-  asio::ip::tcp::endpoint rcvr_endpoint(
-      asio::ip::address::from_string(TEST_IPV4_ADDR), TEST_PORT_NUM);
+/// @brief Test for Scheme::TLS with an IPv6 address
+TEST_F(TestNetworkTransport, TestTlsIPv6) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV6_ADDR,
+      .local_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/receiver.key"}};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{
+      .remote_ip = TEST_IPV6_ADDR,
+      .remote_port = TEST_PORT_NUM,
+      .tls_config = siotrns::ip::TlsConfig{
+          .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+          .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
+          .key_file =
+              std::filesystem::path(CERTS_PATH) / "private/sender.key"}};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::TLS, sndr_opts);
 
-  auto string_serializer = std::make_shared<SimpleStringSerializer>();
+  test_fn_(sndr);
+}
 
-  siotrns::TlsConfig rcvr_tls_config{
-      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
-      .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
-      .key_file = std::filesystem::path(CERTS_PATH) / "private/receiver.key"};
+/// @brief Test for Scheme::UDP with an IPv4 address
+TEST_F(TestNetworkTransport, TestUdpIPv4) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, sndr_opts);
 
-  SimpleString message(string_serializer);
-  size_t num_calls = 0;
-  std::mutex mutex;
-  std::condition_variable cv;
+  test_fn_(sndr);
+}
 
-  auto message_cb = [&](SimpleString const& received) {
-    std::lock_guard lock(mutex);
-    BOOST_LOG_TRIVIAL(debug)
-        << "Received message: \"" << received.entity() << "\"";
-    EXPECT_EQ(received.entity(), message.entity());
-    if (++num_calls == MAX_ITERS) {
-      cv.notify_one();
-    }
-  };
+/// @brief Test for Scheme::UDP with an IPv6 address
+TEST_F(TestNetworkTransport, TestUdpIPv6) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
+                                                .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, string_serializer_, message_cb_,
+      rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP, sndr_opts);
 
-  auto rcvr_strategy = std::make_shared<siotrns::TlsReceiveStrategy>(
-      io_ctx_, rcvr_tls_config, rcvr_endpoint, SimpleString::max_blob_size);
-  auto rcvr = std::make_shared<sio::Receiver<SimpleString>>(
-      rcvr_strategy, string_serializer, message_cb);
+  test_fn_(sndr);
+}
 
-  siotrns::TlsConfig sndr_tls_config{
-      .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
-      .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
-      .key_file = std::filesystem::path(CERTS_PATH) / "private/sender.key"};
+/// @brief Test for Scheme::UDP_BROADCAST with an IPv4 address
+TEST_F(TestNetworkTransport, TestUdpBroadcastIPv4) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, string_serializer_,
+      message_cb_, rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_BROADCAST_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, sndr_opts);
 
-  auto sndr_strategy = std::make_shared<siotrns::TlsSendStrategy>(
-      io_ctx_, sndr_tls_config, rcvr_endpoint);
-  auto sndr = std::make_shared<sio::Sender<SimpleString>>(sndr_strategy);
+  test_fn_(sndr);
+}
 
-  for (int i = 0; i < MAX_ITERS; i++) {
-    sndr->send(message);
+/// @brief Test for Scheme::UDP_BROADCAST with an IPv6 address
+/// @details This should fail because IPv6 does not support broadcast.
+TEST_F(TestNetworkTransport, TestUdpBroadcastIPv6) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, string_serializer_,
+      message_cb_, rcvr_opts);
+  auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
+                                              .remote_port = TEST_PORT_NUM};
+  EXPECT_THROW(siotrns::ip::make_sender<SimpleString>(
+                   io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, sndr_opts),
+               sio::TransportException);
+}
+
+/// @brief Test for Scheme::UDP_MULTICAST with an IPv4 address
+TEST_F(TestNetworkTransport, TestUdpMulticastIPv4) {
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV4_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, string_serializer_,
+      message_cb_, rcvr_opts);
+  auto sndr_opts =
+      siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_MULTICAST_ADDR,
+                                 .remote_port = TEST_PORT_NUM,
+                                 .hops = 1,
+                                 .loopback = true};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, sndr_opts);
+
+  test_fn_(sndr);
+}
+
+/// @brief Test for Scheme::UDP_MULTICAST with an IPv6 address
+TEST_F(TestNetworkTransport, TestUdpMulticastIPv6) {
+  if (std::getenv("GITHUB_ACTIONS") != nullptr) {
+    GTEST_SKIP() << "Skipping IPv6 multicast test on GitHub Actions";
   }
-  {
-    std::unique_lock lock(mutex);
-    EXPECT_TRUE(cv.wait_for(lock, std::chrono::milliseconds(100),
-                            [&] { return num_calls == MAX_ITERS; }));
-  }
+  auto rcvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV6_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
+  auto rcvr = siotrns::ip::make_receiver<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, string_serializer_,
+      message_cb_, rcvr_opts);
+  auto sndr_opts =
+      siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_MULTICAST_ADDR,
+                                 .remote_port = TEST_PORT_NUM,
+                                 .hops = 1,
+                                 .loopback = true};
+  auto sndr = siotrns::ip::make_sender<SimpleString>(
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, sndr_opts);
+
+  test_fn_(sndr);
 }
 
 // NOLINTBEGIN [bugprone-exception-escape]

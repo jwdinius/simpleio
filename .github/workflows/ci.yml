@@ -36,11 +36,6 @@ jobs:
         run: |
           sudo chown -R 0:0 ${{ github.workspace }}
 
-      - name: Run pre-commit
-        run: |
-          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
-            pre-commit run --all-files
-          "
       - name: Tag and push SHA-tagged image
         run: |
           docker push $IMAGE_NAME:$IMAGE_TAG
@@ -51,9 +46,25 @@ jobs:
           docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
           docker push $IMAGE_NAME:latest
 
+  pre-commit:
+    name: pre-commit
+    needs: build-and-push-image
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run pre-commit
+        run: |
+          docker pull $IMAGE_NAME:$IMAGE_TAG
+          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
+            git config --global --add safe.directory /workspace && pre-commit run --all-files
+          "
+
   build-and-test:
     name: Build and Test
-    needs: build-and-push-image
+    needs: pre-commit
     runs-on: ubuntu-22.04
 
     steps:

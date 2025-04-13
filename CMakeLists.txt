@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.23)
-project(simpleio CXX)
+project(simpleio VERSION 0.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+option(${PROJECT_NAME}_ENABLE_TESTS "Build tests" ON)
 
 cmake_policy(SET CMP0167 NEW)
 find_package(Boost 1.74 REQUIRED COMPONENTS system log log_setup)
@@ -27,4 +28,36 @@ add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
 
 add_subdirectory(include)
 add_subdirectory(src)
-add_subdirectory(tests)
+
+if(${PROJECT_NAME}_ENABLE_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
+
+# Install
+include(GNUInstallDirs)
+install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(TARGETS base messages_xml messages_json transports_ip
+        EXPORT ${PROJECT_NAME}Targets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT ${PROJECT_NAME}Targets
+        FILE ${PROJECT_NAME}Targets.cmake
+        NAMESPACE ${PROJECT_NAME}::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/lib/cmake/${PROJECT_NAME})
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY AnyNewerVersion)
+
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/lib/cmake/${PROJECT_NAME})

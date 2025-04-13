@@ -91,14 +91,17 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       return std::make_shared<Sender<MessageT>>(udp_sndr_strategy);
     }
     case Scheme::UDP_BROADCAST: {
+      auto addr = boost::asio::ip::make_address(options.remote_ip);
+      if (addr.is_v6()) {
+        throw TransportException(
+            "Broadcast scheme does not support IPv6 addresses");
+      }
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
       socket->open(boost::asio::ip::udp::v4());
 
       socket->set_option(boost::asio::socket_base::broadcast(true));
-      auto broadcast_addr = boost::asio::ip::make_address_v4(
-          options.remote_ip);  // e.g., 192.168.1.255
       auto endpoint =
-          boost::asio::ip::udp::endpoint(broadcast_addr, options.remote_port);
+          boost::asio::ip::udp::endpoint(addr.to_v4(), options.remote_port);
 
       auto strategy = std::make_shared<UdpSendStrategy>(socket, endpoint);
       return std::make_shared<Sender<MessageT>>(strategy);

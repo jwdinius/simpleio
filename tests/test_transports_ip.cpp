@@ -9,6 +9,7 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/utility/setup/console.hpp>
 #include <condition_variable>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -285,6 +286,9 @@ TEST_F(TestNetworkTransport, TestUdpMulticastIPv4) {
 
 /// @brief Test for Scheme::UDP_MULTICAST with an IPv6 address
 TEST_F(TestNetworkTransport, TestUdpMulticastIPv6) {
+  if (std::getenv("GITHUB_ACTIONS") != nullptr) {
+    GTEST_SKIP() << "Skipping IPv6 multicast test on GitHub Actions";
+  }
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV6_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(

@@ -64,7 +64,7 @@ jobs:
       - name: Build and run tests in devcontainer
         run: |
           docker pull $IMAGE_NAME:$IMAGE_TAG
-          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace $IMAGE_NAME:$IMAGE_TAG bash -c "
+          docker run --rm -u root -v ${{ github.workspace }}:/workspace -w /workspace -e GITHUB_ACTIONS=1 $IMAGE_NAME:$IMAGE_TAG bash -c "
             ./scripts/build && \
             ./scripts/test
           "

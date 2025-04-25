@@ -10,3 +10,7 @@ find_dependency(Poco 1.11 REQUIRED COMPONENTS Net XML)
 find_dependency(OpenSSL 3 REQUIRED)
 
 include("${CMAKE_CURRENT_LIST_DIR}/simpleioTargets.cmake")
+
+add_library(simpleio::messages::xml ALIAS simpleio::messages_xml)
+add_library(simpleio::messages::json ALIAS simpleio::messages_json)
+add_library(simpleio::transports::ip ALIAS simpleio::transports_ip)

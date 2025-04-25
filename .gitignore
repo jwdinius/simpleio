@@ -32,3 +32,6 @@
 *.app
 
 build
+package-root
+_CPack_Packages
+*.deb

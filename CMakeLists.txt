@@ -61,3 +61,27 @@ install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/lib/cmake/${PROJECT_NAME})
+
+include(InstallRequiredSystemLibraries)
+execute_process(
+  COMMAND dpkg --print-architecture
+  OUTPUT_VARIABLE DEB_ARCH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+# Required basic metadata
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}-dev")
+set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-dev_${PROJECT_VERSION}_${DEB_ARCH}")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_CONTACT "josephwdinius@gmail.com")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "I/O Simplified - network, serial, and beyond!")
+set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_VENDOR "Joe Dinius, Ph.D.")
+set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Joe Dinius, Ph.D.")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/jwdinius/simpleio.git")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libboost-all-dev, libpoco-dev, libgtest-dev, libmsgsl-dev, nlohmann-json3-dev")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${DEB_ARCH}")
+
+include(CPack)

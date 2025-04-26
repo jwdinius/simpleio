@@ -64,10 +64,9 @@ std::shared_ptr<Sender<MessageT>> make_sender(
   switch (scheme) {
     case Scheme::TCP: {
       auto sndr_strategy = std::make_shared<TcpSendStrategy>(
-          io_wrkr->get_task_scheduler(),
-          boost::asio::ip::tcp::endpoint(
-              boost::asio::ip::address::from_string(options.remote_ip),
-              options.remote_port));
+          io_ctx, boost::asio::ip::tcp::endpoint(
+                      boost::asio::ip::address::from_string(options.remote_ip),
+                      options.remote_port));
       return std::make_shared<Sender<MessageT>>(sndr_strategy);
     }
     case Scheme::TLS: {
@@ -75,15 +74,14 @@ std::shared_ptr<Sender<MessageT>> make_sender(
         throw TransportException("TLS config is required for TLS scheme");
       }
       auto tls_sndr_strategy = std::make_shared<TlsSendStrategy>(
-          io_wrkr->get_task_scheduler(), options.tls_config.value(),
+          io_ctx, options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.remote_ip),
               options.remote_port));
       return std::make_shared<Sender<MessageT>>(tls_sndr_strategy);
     }
     case Scheme::UDP: {
-      auto socket = std::make_shared<boost::asio::ip::udp::socket>(
-          *(io_wrkr->get_task_scheduler()));
+      auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
       auto udp_sndr_strategy = std::make_shared<UdpSendStrategy>(
           socket, boost::asio::ip::udp::endpoint(
                       boost::asio::ip::address::from_string(options.remote_ip),

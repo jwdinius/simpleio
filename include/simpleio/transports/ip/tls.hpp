@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 #include "simpleio/transport.hpp"
 
@@ -34,9 +35,9 @@ class TlsSendStrategy : public SendStrategy {
                            TlsConfig const& tls_config,
                            boost::asio::ip::tcp::endpoint remote_endpoint);
 
-  /// @brief Send a byte vector securely.
-  /// @param blob, the byte vector to send.
-  void send(std::vector<std::byte> const& blob) override;
+  /// @brief Send a string securely.
+  /// @param blob, the string to send.
+  void send(std::string const& blob) override;
 
  private:
   void connect();

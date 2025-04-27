@@ -16,7 +16,6 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <vector>
 
 #include "certs_path.h"  // NOLINT [build/include_subdir]
 #include "simpleio/transports/ip/ip.hpp"
@@ -45,14 +44,12 @@ static constexpr size_t MAX_ITERS = 10;
 
 class SimpleStringSerializer : public sio::SerializationStrategy<std::string> {
  public:
-  std::vector<std::byte> serialize(std::string const& entity) override {
-    std::vector<std::byte> blob(entity.size());
-    std::memcpy(blob.data(), entity.data(), entity.size());
-    return blob;
+  std::string serialize(std::string const& entity) override {
+    return entity;
   }
 
-  std::string deserialize(std::vector<std::byte> const& blob) override {
-    return {reinterpret_cast<char const*>(blob.data()), blob.size()};
+  std::string deserialize(std::string const& blob) override {
+    return blob;
   }
 };
 
@@ -60,11 +57,10 @@ class SimpleString : public sio::Message<std::string> {
  public:
   explicit SimpleString(
       std::shared_ptr<sio::SerializationStrategy<std::string>> serializer)
-      : sio::Message<std::string>(std::string("Hello, World!"),
-                                  std::move(serializer)) {}
+      : sio::Message<std::string>("Hello, World!", std::move(serializer)) {}
 
   SimpleString(
-      std::vector<std::byte> const& blob,
+      std::string const& blob,
       std::shared_ptr<sio::SerializationStrategy<std::string>> serializer)
       : sio::Message<std::string>(blob, std::move(serializer)) {}
 };

@@ -5,7 +5,7 @@
 #include <Poco/DOM/Document.h>
 
 #include <memory>
-#include <vector>
+#include <string>
 
 #include "simpleio/message.hpp"
 
@@ -20,17 +20,17 @@ using XmlMessageType = Poco::XML::AutoPtr<Poco::XML::Document>;
 /// library.
 class XmlSerializer : public SerializationStrategy<XmlMessageType> {
  public:
-  /// @brief Serialize a Poco XML Document into a byte vector.
+  /// @brief Serialize a Poco XML Document into a string.
   /// @param entity, the Poco XML Document to serialize.
-  /// @return std::vector<std::byte>, the serialized XML Document.
+  /// @return std::string, the serialized XML Document.
   /// @throw SerializationError, if an error occurs during serialization.
-  std::vector<std::byte> serialize(XmlMessageType const& entity) override;
+  std::string serialize(XmlMessageType const& entity) override;
 
-  /// @brief Deserialize a byte vector into a Poco XML Document.
-  /// @param blob, the byte vector to deserialize.
+  /// @brief Deserialize a string into a Poco XML Document.
+  /// @param blob, the string to deserialize.
   /// @return XmlMessageType, the deserialized XML Document.
   /// @throw SerializationError, if an error occurs during deserialization.
-  XmlMessageType deserialize(std::vector<std::byte> const& blob) override;
+  XmlMessageType deserialize(std::string const& blob) override;
 };
 
 }  // namespace simpleio::messages

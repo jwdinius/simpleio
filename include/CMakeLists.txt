@@ -8,11 +8,6 @@ target_sources(base
       simpleio/worker.hpp
 )
 
-target_link_libraries(base
-  INTERFACE
-    Microsoft.GSL::GSL
-)
-
 target_sources(messages_xml
   PUBLIC
     FILE_SET HEADERS

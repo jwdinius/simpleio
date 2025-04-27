@@ -3,6 +3,7 @@
 #pragma once
 #include <boost/asio.hpp>
 #include <memory>
+#include <string>
 
 #include "simpleio/transport.hpp"
 
@@ -18,9 +19,9 @@ class TcpSendStrategy : public SendStrategy {
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::tcp::endpoint remote_endpoint);
 
-  /// @brief Send a byte vector.
-  /// @param blob, the byte vector to send.
-  void send(std::vector<std::byte> const& blob) override;
+  /// @brief Send a string.
+  /// @param blob, the string to send.
+  void send(std::string const& blob) override;
 
  private:
   void connect();

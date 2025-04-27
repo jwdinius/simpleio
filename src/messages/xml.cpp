@@ -11,35 +11,27 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
 namespace sio = simpleio;
 namespace siomsg = simpleio::messages;
 
-std::vector<std::byte> siomsg::XmlSerializer::serialize(
+std::string siomsg::XmlSerializer::serialize(
     siomsg::XmlMessageType const& entity) {
   try {
     Poco::XML::DOMWriter writer;
     std::ostringstream oss;
     writer.writeNode(oss, entity);
 
-    std::string xml_string = oss.str();
-    size_t xml_size = xml_string.size();
-    std::vector<std::byte> blob(xml_size);
-    std::memcpy(blob.data(), xml_string.data(), xml_size);
-
-    return blob;
+    return oss.str();
   } catch (Poco::Exception& e) {
     throw sio::SerializationError(e.what());
   }
 }
 
 siomsg::XmlMessageType siomsg::XmlSerializer::deserialize(
-    std::vector<std::byte> const& blob) {
+    std::string const& blob) {
   try {
-    std::string xml_string(reinterpret_cast<char const*>(blob.data()),
-                           blob.size());
-    std::istringstream iss(xml_string);
+    std::istringstream iss(blob);
     Poco::XML::DOMParser parser;
     Poco::XML::InputSource input_source(iss);
     return parser.parse(&input_source);

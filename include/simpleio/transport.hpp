@@ -126,4 +126,50 @@ class Receiver {
   std::shared_ptr<AsyncQueue<MessageT>> event_queue_;
   std::unique_ptr<Worker<MessageT>> worker_;
 };
+
+template <typename ServiceT>
+class Client : public Sender<typename ServiceT::RequestT>,
+               public Receiver<typename ServiceT::ResponseT> {
+ public:
+  /// @brief Default constructor deleted.
+  Client() = delete;
+
+  /// @brief Constructor.
+  explicit Client(
+      std::shared_ptr<SendStrategy> request_strategy,
+      std::shared_ptr<ReceiveStrategy> response_strategy,
+      std::shared_ptr<
+          SerializationStrategy<typename ServiceT::ResponseT::entity_type>>
+          response_serializer,
+      std::function<void(typename ServiceT::ResponseT const&)> response_cb)
+      : Sender<typename ServiceT::RequestT>(std::move(request_strategy)),
+        Receiver<typename ServiceT::ResponseT>(std::move(response_strategy),
+                                               std::move(response_serializer),
+                                               std::move(response_cb)) {}
+
+  ~Client() = default;
+};
+
+template <typename ServiceT>
+class Server : public Receiver<typename ServiceT::RequestT>,
+               public Sender<typename ServiceT::ResponseT> {
+ public:
+  /// @brief Default constructor deleted.
+  Server() = delete;
+
+  /// @brief Constructor.
+  explicit Server(
+      std::shared_ptr<ReceiveStrategy> request_strategy,
+      std::shared_ptr<SendStrategy> response_strategy,
+      std::shared_ptr<
+          SerializationStrategy<typename ServiceT::RequestT::entity_type>>
+          request_serializer,
+      std::function<void(typename ServiceT::RequestT const&)> request_cb)
+      : Receiver<typename ServiceT::RequestT>(std::move(request_strategy),
+                                              std::move(request_serializer),
+                                              std::move(request_cb)),
+        Sender<typename ServiceT::ResponseT>(std::move(response_strategy)) {}
+
+  ~Server() = default;
+};
 }  // namespace simpleio

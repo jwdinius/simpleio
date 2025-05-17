@@ -29,10 +29,10 @@ class SendStrategy {
   /// @brief Declare default destructor to allow inheritance.
   virtual ~SendStrategy() = default;
 
-  /// @brief Send a byte vector.
-  /// @param blob, the byte vector to send.
+  /// @brief Send a string.
+  /// @param blob, the string to send.
   /// @throw TransportException, if an error occurs during sending.
-  virtual void send(std::vector<std::byte> const& blob) = 0;
+  virtual void send(std::string const& blob) = 0;
 };
 
 /// @brief Message sender
@@ -56,8 +56,7 @@ class Sender {
   /// @param message, the message to send.
   /// @throw TransportException, if an error occurs during sending.
   void send(MessageT const& message) {
-    std::vector<std::byte> blob{message.blob().begin(), message.blob().end()};
-    strategy_->send(blob);
+    strategy_->send(message.blob());
   }
 
  private:
@@ -76,15 +75,12 @@ class ReceiveStrategy {
   virtual ~ReceiveStrategy() = default;
 
   void set_event_callback(
-      std::function<void(std::vector<std::byte> const&)> const& event_cb) {
+      std::function<void(std::string const&)> const& event_cb) {
     event_cb_ = event_cb;
   }
 
-  /// @brief Grant Receiver access to the blob queue to unpack messages.
-  // friend class Receiver;
-
  protected:
-  std::function<void(std::vector<std::byte> const&)> event_cb_;
+  std::function<void(std::string const&)> event_cb_;
 };
 
 /// @brief Message receiver
@@ -96,8 +92,11 @@ class Receiver {
   /// @brief Default constructor deleted.
   Receiver() = delete;
 
-  /// @brief Construct from a ReceiveStrategy object.
+  /// @brief Constructor.
   /// @param strategy, the ReceiveStrategy object to use.
+  /// @param serializer, the SerializationStrategy object to use.
+  /// @param message_cb, the callback function to call when a message is
+  ///                    received.
   explicit Receiver(
       std::shared_ptr<ReceiveStrategy> strategy,
       std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
@@ -105,8 +104,8 @@ class Receiver {
       std::function<void(MessageT const&)> message_cb)
       : strategy_(std::move(strategy)),
         serializer_(std::move(serializer)),
-        event_queue_(std::make_shared<simpleio::AsyncQueue<MessageT>>()) {
-    strategy_->set_event_callback([this](std::vector<std::byte> const& blob) {
+        event_queue_(std::make_shared<AsyncQueue<MessageT>>()) {
+    strategy_->set_event_callback([this](std::string const& blob) {
       auto message = MessageT(blob, serializer_);
       event_queue_->push(message);
     });
@@ -124,7 +123,7 @@ class Receiver {
   std::shared_ptr<ReceiveStrategy> strategy_;
   std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
       serializer_;
-  std::shared_ptr<simpleio::AsyncQueue<MessageT>> event_queue_;
+  std::shared_ptr<AsyncQueue<MessageT>> event_queue_;
   std::unique_ptr<Worker<MessageT>> worker_;
 };
 }  // namespace simpleio

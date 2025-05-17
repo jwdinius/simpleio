@@ -4,6 +4,7 @@
 
 #include <boost/log/trivial.hpp>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace sio = simpleio;
@@ -14,10 +15,10 @@ siotrns::ip::TcpSendStrategy::TcpSendStrategy(
     boost::asio::ip::tcp::endpoint remote_endpoint)
     : socket_(*io_ctx), remote_endpoint_(std::move(remote_endpoint)) {}
 
-void siotrns::ip::TcpSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::TcpSendStrategy::send(std::string const& blob) {
   connect();
   boost::asio::async_write(
-      socket_, boost::asio::buffer(blob),
+      socket_, boost::asio::buffer(blob.data(), blob.size()),
       [this](boost::system::error_code err_code, std::size_t bytes_sent) {
         if (!err_code) {
           BOOST_LOG_TRIVIAL(debug) << "Sent " << bytes_sent << " bytes "
@@ -76,10 +77,10 @@ void siotrns::ip::TcpReceiveStrategy::start_accepting() {
 
 void siotrns::ip::TcpReceiveStrategy::start_receiving(
     std::shared_ptr<boost::asio::ip::tcp::socket> const& socket) {
-  auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
+  auto buffer = std::make_shared<std::string>(max_blob_size_, '\0');
 
   boost::asio::async_read(
-      *socket, boost::asio::buffer(*buffer),
+      *socket, boost::asio::buffer(buffer->data(), buffer->size()),
       [this, buffer, socket](boost::system::error_code err_code,
                              size_t bytes_recvd) {
         // We expect the client to close the connection after sending a message

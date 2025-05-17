@@ -28,7 +28,6 @@ RUN apt-get update && apt-get install -y \
    libboost-all-dev \
    libpoco-dev \
    libgtest-dev \
-   libmsgsl-dev \
    llvm \
    nlohmann-json3-dev \
    uncrustify \

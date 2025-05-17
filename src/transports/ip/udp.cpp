@@ -4,8 +4,8 @@
 
 #include <boost/log/trivial.hpp>
 #include <memory>
+#include <string>
 #include <utility>
-#include <vector>
 
 namespace ba = boost::asio;
 namespace sio = simpleio;
@@ -34,7 +34,7 @@ siotrns::ip::UdpSendStrategy::~UdpSendStrategy() {
   }
 }
 
-void siotrns::ip::UdpSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::UdpSendStrategy::send(std::string const& blob) {
   auto send_fn = [this](boost::system::error_code err_code,
                         std::size_t bytes_sent) {
     if (!err_code) {
@@ -72,7 +72,7 @@ siotrns::ip::UdpReceiveStrategy::~UdpReceiveStrategy() {
 }
 
 void siotrns::ip::UdpReceiveStrategy::start_receiving() {
-  auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
+  auto buffer = std::make_shared<std::string>(max_blob_size_, '\0');
   auto remote_endpoint = std::make_shared<ba::ip::udp::endpoint>();
 
   socket_->async_receive_from(

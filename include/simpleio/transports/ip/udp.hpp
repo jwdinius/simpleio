@@ -3,6 +3,7 @@
 #pragma once
 #include <boost/asio.hpp>
 #include <memory>
+#include <string>
 
 #include "simpleio/transport.hpp"
 
@@ -20,9 +21,9 @@ class UdpSendStrategy : public SendStrategy {
 
   ~UdpSendStrategy() override;
 
-  /// @brief Send a byte vector.
-  /// @param blob, the byte vector to send.
-  void send(std::vector<std::byte> const& blob) override;
+  /// @brief Send a string.
+  /// @param blob, the string to send.
+  void send(std::string const& blob) override;
 
  private:
   std::shared_ptr<boost::asio::ip::udp::socket> socket_;

@@ -4,8 +4,8 @@
 
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <string>
 #include <utility>
-#include <vector>
 
 #include "simpleio/messages/json.hpp"
 
@@ -28,8 +28,7 @@ TEST(JsonMessageTest, TestPackUnpackNominal) {
   }
 
   // Copy the packed entity
-  std::vector<std::byte> serialized_json_msg{json_msg->blob().begin(),
-                                             json_msg->blob().end()};
+  std::string serialized_json_msg{json_msg->blob()};
 
   // Create a new JsonMessage from the packed entity
   auto json_msg_from_serialized =

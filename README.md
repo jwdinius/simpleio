@@ -5,8 +5,8 @@ I/O Simplified - network, serial, and beyond!
 
 Moving structured data between devices/processes follows the standard pattern of
 1. Create a data structure (_define_).
-2. Convert the data structure to a byte array (_serialize_).
-3. Send the byte array to a receiving process over a system interface (_transport_).
+2. Convert the data structure to a string (_serialize_).
+3. Send the string contents to a receiving process over a system interface (_transport_).
 4. Retrieve original data structure in the receiving process (_deserialize_).
 
 Whether the data structure is XML, JSON, or a custom data class, the pattern doesn't

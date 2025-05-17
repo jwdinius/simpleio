@@ -35,10 +35,10 @@ siotrns::ip::TlsSendStrategy::TlsSendStrategy(
   }
 }
 
-void siotrns::ip::TlsSendStrategy::send(std::vector<std::byte> const& blob) {
+void siotrns::ip::TlsSendStrategy::send(std::string const& blob) {
   connect();
   boost::asio::async_write(
-      *socket_, boost::asio::buffer(blob),
+      *socket_, boost::asio::buffer(blob.data(), blob.size()),
       [this](boost::system::error_code err_code, std::size_t bytes_sent) {
         if (!err_code) {
           BOOST_LOG_TRIVIAL(debug) << "Sent " << bytes_sent
@@ -155,7 +155,7 @@ void siotrns::ip::TlsReceiveStrategy::start_handshake(
 void siotrns::ip::TlsReceiveStrategy::start_receiving(
     std::shared_ptr<
         boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> const& socket) {
-  auto buffer = std::make_shared<std::vector<std::byte>>(max_blob_size_);
+  auto buffer = std::make_shared<std::string>(max_blob_size_, '\0');
 
   boost::asio::async_read(
       *socket, boost::asio::buffer(*buffer),

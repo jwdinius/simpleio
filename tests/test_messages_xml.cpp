@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string>
 #include <utility>
-#include <vector>
 
 #include "simpleio/messages/xml.hpp"
 
@@ -37,8 +37,7 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   }
 
   // Copy the packed entity
-  std::vector<std::byte> serialized_xml_msg{xml_msg->blob().begin(),
-                                            xml_msg->blob().end()};
+  std::string serialized_xml_msg{xml_msg->blob()};
 
   // Create a new XmlMessage from the packed entity
   auto xml_msg_from_serialized =

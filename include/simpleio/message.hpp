@@ -2,16 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0#pragma once
 #pragma once
 #include <algorithm>
-#include <gsl/span>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace simpleio {
 
-static auto constexpr DEFAULT_MAX_BLOB_SIZE = 1024;
+static constexpr size_t DEFAULT_MAX_BLOB_SIZE = 1024;
 
 /// @brief Exception thrown when a serialization or deserialization error
 /// occurs.
@@ -25,7 +23,7 @@ class SerializationError : public std::runtime_error {
 /// templated type.
 /// @details Implementations of this class are responsible for converting data
 /// structures of type T
-///          into byte vectors and vice versa. They are also responsible for
+///          into strings and vice versa. They are also responsible for
 ///          throwing SerializationError exceptions when serialization or
 ///          deserialization fails.
 /// @tparam T, the type of the data structure to serialize and deserialize.
@@ -35,17 +33,17 @@ class SerializationStrategy {
   /// @brief Declare default destructor to allow inheritance.
   ~SerializationStrategy() = default;
 
-  /// @brief Serialize a data structure of type T into a byte vector.
+  /// @brief Serialize a data structure of type T into a string.
   /// @param entity, the data structure to serialize.
-  /// @return std::vector<std::byte>, the serialized data structure.
+  /// @return std::string, the serialized data structure.
   /// @throw SerializationError, if an error occurs during serialization.
-  virtual std::vector<std::byte> serialize(T const& entity) = 0;
+  virtual std::string serialize(T const& entity) = 0;
 
-  /// @brief Deserialize a byte vector into a data structure of type T.
-  /// @param blob, the byte vector to deserialize.
+  /// @brief Deserialize a string into a data structure of type T.
+  /// @param blob, the string to deserialize.
   /// @return T, the deserialized data structure.
   /// @throw SerializationError, if an error occurs during deserialization.
-  virtual T deserialize(std::vector<std::byte> const& blob) = 0;
+  virtual T deserialize(std::string const& blob) = 0;
 };
 
 /// @brief A message class encapsulating a data structure of type T and its
@@ -76,9 +74,14 @@ class Message {
   /// @throw SerializationError, if an error occurs during serialization.
   explicit Message(T const& entity,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : entity_(entity), strategy_(std::move(strategy)) {
+      : entity_(entity),
+        strategy_(std::move(strategy)),
+        blob_(max_blob_size, '\0') {
     auto _blob = strategy_->serialize(entity_);
-    length_ = _blob.size();
+    if (_blob.size() > max_blob_size) {
+      throw SerializationError("Blob size exceeds maximum size.");
+    }
+    blob_.resize(_blob.size());
     std::copy(_blob.begin(), _blob.end(), blob_.begin());
   }
 
@@ -89,38 +92,53 @@ class Message {
   /// @throw SerializationError, if an error occurs during serialization.
   explicit Message(T&& entity,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : entity_(std::move(entity)), strategy_(std::move(strategy)) {
+      : entity_(std::move(entity)),
+        strategy_(std::move(strategy)),
+        blob_(max_blob_size, '\0') {
     auto _blob = strategy_->serialize(entity_);
-    length_ = _blob.size();
+    if (_blob.size() > max_blob_size) {
+      throw SerializationError("Blob size exceeds maximum size.");
+    }
+    blob_.resize(_blob.size());
     std::move(_blob.begin(), _blob.end(), blob_.begin());
   }
 
-  /// @brief Construct a message from a byte vector and a
+  /// @brief Construct a message from a string and a
   /// SerializationStrategy<T> object.
-  /// @param blob, the byte vector to deserialize and encapsulate
+  /// @param blob, the string to deserialize and encapsulate
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializationError, if an error occurs during deserialization.
-  explicit Message(std::vector<std::byte> const& _blob,
+  /// @details This constructor is only compiled if T is not a string.
+  template <typename U = T,
+            typename = std::enable_if_t<!std::is_same_v<U, std::string>>>
+  explicit Message(std::string const& _blob,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : strategy_(std::move(strategy)) {
-    length_ = _blob.size();
+      : strategy_(std::move(strategy)), blob_(max_blob_size, '\0') {
+    if (_blob.size() > max_blob_size) {
+      throw SerializationError("Blob size exceeds maximum size.");
+    }
+    blob_.resize(_blob.size());
     std::copy(_blob.begin(), _blob.end(), blob_.begin());
-    std::vector<std::byte> blob_copy{blob_.begin(), blob_.begin() + length_};
-    entity_ = strategy_->deserialize(blob_copy);
+    entity_ = strategy_->deserialize(blob_);
   }
 
-  /// @brief Construct from a moved byte vector and a SerializationStrategy<T>
+  /// @brief Construct from a string and a SerializationStrategy<T>
   /// object.
-  /// @param blob, the byte vector to deserialize and encapsulate
+  /// @param blob, the string to deserialize and encapsulate
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializationError, if an error occurs during deserialization.
-  explicit Message(std::vector<std::byte>&& _blob,
+  /// @details This constructor is only compiled if T is not a string.
+  template <typename U = T,
+            typename = std::enable_if_t<!std::is_same_v<U, std::string>>>
+  explicit Message(std::string&& _blob,
                    std::shared_ptr<SerializationStrategy<T>> strategy)
-      : strategy_(std::move(strategy)) {
-    length_ = _blob.size();
+      : strategy_(std::move(strategy)), blob_(max_blob_size, '\0') {
+    if (_blob.size() > max_blob_size) {
+      throw SerializationError("Blob size exceeds maximum size.");
+    }
+    blob_.resize(_blob.size());
     std::move(_blob.begin(), _blob.end(), blob_.begin());
-    std::vector<std::byte> blob_copy{blob_.begin(), blob_.begin() + length_};
-    entity_ = strategy_->deserialize(blob_copy);
+    entity_ = strategy_->deserialize(blob_);
   }
 
   virtual ~Message() = default;
@@ -131,17 +149,16 @@ class Message {
     return entity_;
   }
 
-  /// @brief Return (a view of) the serialized data structure.
-  /// @return gsl::span<const std::byte>, a view of the serialized data
+  /// @brief Return the serialized data structure.
+  /// @return the serialized data
   /// structure.
-  [[nodiscard]] gsl::span<const std::byte> blob() const {
-    return {blob_.data(), length_};
+  [[nodiscard]] std::string blob() const {
+    return blob_;
   }
 
  private:
   std::shared_ptr<SerializationStrategy<T>> strategy_;
   T entity_;
-  std::vector<std::byte> blob_{max_blob_size};
-  size_t length_;
+  std::string blob_;
 };
 }  // namespace simpleio

@@ -21,9 +21,16 @@ add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
 add_library(messages_json SHARED)
 add_library(${PROJECT_NAME}::messages::json ALIAS messages_json)
 
+add_library(messages_http INTERFACE)
+add_library(${PROJECT_NAME}::messages::http ALIAS messages_http)
+
 # Transport classes
 add_library(transports_ip SHARED)
 add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
+
+# TESTING
+#add_executable(beast_client)
+#add_executable(beast_server)
 
 add_subdirectory(include)
 add_subdirectory(src)

@@ -10,6 +10,7 @@ target_sources(messages_json
 
 target_sources(transports_ip
   PRIVATE
+    #transports/ip/http.cpp
     transports/ip/ip.cpp
     transports/ip/tcp.cpp
     transports/ip/tls.cpp
@@ -21,3 +22,17 @@ target_link_libraries(transports_ip
     Boost::log
     Boost::log_setup
 )
+
+#target_sources(beast_client
+#  PRIVATE
+#    transports/ip/http_client.cpp
+#)
+#
+#target_sources(beast_server
+#  PRIVATE
+#    transports/ip/http_server.cpp
+#)
+#target_link_libraries(beast_server
+#  PRIVATE
+#    Boost::system
+#)

@@ -24,6 +24,15 @@ target_link_libraries(test_messages_json
 )
 add_test(NAME test_messages_json COMMAND test_messages_json)
 
+add_executable(test_messages_http test_messages_http.cpp)
+target_link_libraries(test_messages_http
+  PRIVATE
+    ${GTEST_LIBRARIES}
+    pthread
+    ${PROJECT_NAME}::messages::http
+)
+add_test(NAME test_messages_http COMMAND test_messages_http)
+
 # Install tls certificates to the build directory under the certs directory
 set(CERTS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/certs)
 file(GENERATE

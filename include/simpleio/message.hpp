@@ -3,6 +3,7 @@
 #pragma once
 #include <algorithm>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,6 +18,11 @@ class SerializationError : public std::runtime_error {
  public:
   explicit SerializationError(std::string const& what)
       : std::runtime_error(what) {}
+};
+
+class SerializationStrategyBase {
+ public:
+  virtual ~SerializationStrategyBase() = default;
 };
 
 /// @brief Strategy for serializing and deserializing data structures with
@@ -79,7 +85,10 @@ class Message {
         blob_(max_blob_size, '\0') {
     auto _blob = strategy_->serialize(entity_);
     if (_blob.size() > max_blob_size) {
-      throw SerializationError("Blob size exceeds maximum size.");
+      std::ostringstream oss;
+      oss << "Blob size exceeds maximum size: " << _blob.size() << " > "
+          << max_blob_size;
+      throw SerializationError(oss.str());
     }
     blob_.resize(_blob.size());
     std::copy(_blob.begin(), _blob.end(), blob_.begin());
@@ -97,7 +106,10 @@ class Message {
         blob_(max_blob_size, '\0') {
     auto _blob = strategy_->serialize(entity_);
     if (_blob.size() > max_blob_size) {
-      throw SerializationError("Blob size exceeds maximum size.");
+      std::ostringstream oss;
+      oss << "Blob size exceeds maximum size: " << _blob.size() << " > "
+          << max_blob_size;
+      throw SerializationError(oss.str());
     }
     blob_.resize(_blob.size());
     std::move(_blob.begin(), _blob.end(), blob_.begin());
@@ -115,7 +127,10 @@ class Message {
                    std::shared_ptr<SerializationStrategy<T>> strategy)
       : strategy_(std::move(strategy)), blob_(max_blob_size, '\0') {
     if (_blob.size() > max_blob_size) {
-      throw SerializationError("Blob size exceeds maximum size.");
+      std::ostringstream oss;
+      oss << "Blob size exceeds maximum size: " << _blob.size() << " > "
+          << max_blob_size;
+      throw SerializationError(oss.str());
     }
     blob_.resize(_blob.size());
     std::copy(_blob.begin(), _blob.end(), blob_.begin());
@@ -134,7 +149,10 @@ class Message {
                    std::shared_ptr<SerializationStrategy<T>> strategy)
       : strategy_(std::move(strategy)), blob_(max_blob_size, '\0') {
     if (_blob.size() > max_blob_size) {
-      throw SerializationError("Blob size exceeds maximum size.");
+      std::ostringstream oss;
+      oss << "Blob size exceeds maximum size: " << _blob.size() << " > "
+          << max_blob_size;
+      throw SerializationError(oss.str());
     }
     blob_.resize(_blob.size());
     std::move(_blob.begin(), _blob.end(), blob_.begin());
@@ -160,5 +178,16 @@ class Message {
   std::shared_ptr<SerializationStrategy<T>> strategy_;
   T entity_;
   std::string blob_;
+};
+
+template <typename RequestType, typename ResponseType = RequestType,
+          size_t MaxRequestBlobSize =   // NOLINT [whitespace/indent_namespace]
+          DEFAULT_MAX_BLOB_SIZE,        // NOLINT [whitespace/indent_namespace]
+          size_t MaxResponseBlobSize =  // NOLINT [whitespace/indent_namespace]
+          DEFAULT_MAX_BLOB_SIZE>        // NOLINT [whitespace/indent_namespace]
+class Service {
+ public:
+  using RequestT = Message<RequestType, MaxRequestBlobSize>;
+  using ResponseT = Message<ResponseType, MaxResponseBlobSize>;
 };
 }  // namespace simpleio

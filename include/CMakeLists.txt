@@ -34,10 +34,24 @@ target_link_libraries(messages_json
     nlohmann_json::nlohmann_json
 )
 
+target_sources(messages_http
+  INTERFACE
+    FILE_SET HEADERS
+    FILES
+      simpleio/messages/http.hpp
+)
+
+target_link_libraries(messages_http
+  INTERFACE
+    base
+    Boost::system
+)
+
 target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
+      #simpleio/transports/ip/http.hpp
       simpleio/transports/ip/ip.hpp
       simpleio/transports/ip/tcp.hpp
       simpleio/transports/ip/tls.hpp
@@ -50,3 +64,8 @@ target_link_libraries(transports_ip
     Boost::system
     OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
 )
+
+#target_link_libraries(beast_client
+#  PUBLIC
+#    transports_ip
+#)

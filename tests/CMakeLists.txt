@@ -5,7 +5,16 @@ enable_testing()
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
-# Add the test executable
+# Add the test executables
+add_executable(test_worker test_worker.cpp)
+target_link_libraries(test_worker
+  PRIVATE
+    ${GTEST_LIBRARIES}
+    pthread
+    ${PROJECT_NAME}::worker
+)
+add_test(NAME test_worker COMMAND test_worker)
+
 add_executable(test_messages_xml test_messages_xml.cpp)
 target_link_libraries(test_messages_xml
   PRIVATE

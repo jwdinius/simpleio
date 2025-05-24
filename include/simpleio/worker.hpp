@@ -3,6 +3,7 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -14,13 +15,26 @@
 #include "simpleio/async_queue.hpp"
 
 namespace simpleio {
+/// @brief Worker class for managing a pool of threads to execute tasks
+/// asynchronously.
 class Worker {
  public:
+  /// @brief Default constructor for the Worker class.
+  /// @details This constructor initializes the worker with a single thread and
+  ///          starts running it.
   Worker() : threads_{1} {
     run();
   }
 
+  /// @brief Constructor for the Worker class with a specified number of
+  /// threads.
+  /// @param num_threads, the number of threads to create for the worker.
+  /// @throw std::invalid_argument, if num_threads is zero.
   explicit Worker(size_t num_threads) : threads_(num_threads) {
+    if (num_threads == 0) {
+      throw std::invalid_argument(
+          "Number of threads must be greater than zero.");
+    }
     run();
   }
 
@@ -31,7 +45,7 @@ class Worker {
     shutdown();
   }
 
-  /// @brief Shut down and join the worker thread.
+  /// @brief Shut down and join the worker threads.
   void shutdown() {
     shutdown_ = true;
     tasks_.shutdown();
@@ -43,6 +57,12 @@ class Worker {
   }
 
   /// @brief Push a task to the worker thread.
+  /// @tparam F, the type of the function to execute.
+  /// @tparam Args, the types of the arguments to pass to the function.
+  /// @param f, the function to execute.
+  /// @param args, the arguments to pass to the function.
+  /// @return a future that will hold the result of the
+  ///         function execution.
   template <typename F, typename... Args>
   std::future<typename std::result_of<F(Args...)>::type> push(F&& f,
                                                               Args&&... args) {
@@ -58,16 +78,17 @@ class Worker {
 
  private:
   /// @brief Run the worker.
-  /// @details This function runs the worker, waiting for messages to
+  /// @details Each thread will wait for tasks to be pushed onto the queue and
+  ///          execute them until the worker is shut down.
   void run() {
     for (auto&& thread : threads_) {
       thread = std::thread([this] {
-        while (!shutdown_) {
-          while (tasks_.try_pop() == std::nullopt) {
-            std::this_thread::yield();
+        while (true) {
+          auto task = tasks_.wait_and_pop();
+          if (!task || shutdown_) {
+            break;
           }
-          auto task = std::move(tasks_.pop());
-          task();
+          (*task)();
         }
       });
     }

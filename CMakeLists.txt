@@ -22,8 +22,8 @@ add_library(messages_json SHARED)
 add_library(${PROJECT_NAME}::messages::json ALIAS messages_json)
 
 # Transport classes
-add_library(transports_ip SHARED)
-add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
+#add_library(transports_ip SHARED)
+#add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
 
 add_subdirectory(include)
 add_subdirectory(src)
@@ -44,7 +44,7 @@ install(
     base
     messages_xml
     messages_json
-    transports_ip
+    #transports_ip
   EXPORT ${PROJECT_NAME}Targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

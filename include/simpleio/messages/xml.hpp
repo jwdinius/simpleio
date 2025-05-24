@@ -18,7 +18,7 @@ using XmlMessageType = Poco::XML::AutoPtr<Poco::XML::Document>;
 /// @brief Serialize and deserialize XML messages.
 /// @details XML messages are serialized and deserialized using Poco's XML
 /// library.
-class XmlSerializer : public SerializationStrategy<XmlMessageType> {
+class XmlSerializer : public Serializer<XmlMessageType> {
  public:
   /// @brief Serialize a Poco XML Document into a string.
   /// @param entity, the Poco XML Document to serialize.

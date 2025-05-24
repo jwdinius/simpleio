@@ -5,77 +5,77 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "simpleio/async_queue.hpp"
 
 namespace simpleio {
-/// @brief Worker class for processing messages from an AsyncQueue.
-/// @details This class provides a worker thread that processes messages from
-///          an AsyncQueue. The worker thread runs a loop that waits for
-///          messages to arrive in the queue and then calls a user-defined
-///          callback function to process the message.
-/// @tparam MessageT, the type of message to process.
-template <typename MessageT>
 class Worker {
  public:
-  /// @brief Delete the default constructor for the Worker class.
-  Worker() = delete;
+  Worker() : threads_{1} {
+    run();
+  }
 
-  /// @brief Construct a Worker object with a message queue and a callback.
-  /// @param message_queue, the shared message queue to process messages from.
-  /// @param message_cb, the callback function to call when a message is
-  ///        received.
-  explicit Worker(std::shared_ptr<AsyncQueue<MessageT>> message_queue,
-                  std::function<void(MessageT const&)> message_cb)
-      : message_queue_(std::move(message_queue)),
-        message_cb_(std::move(message_cb)) {
-    // Start the worker thread
-    worker_thread_ = std::thread([this] {
-      try {
-        run();
-      } catch (std::exception const& e) {
-        std::cerr << "Worker thread exception: " << e.what() << std::endl;
-      }
-    });
+  explicit Worker(size_t num_threads) : threads_(num_threads) {
+    run();
   }
 
   /// @brief Destructor for the Worker class.
   /// @details This destructor shuts down the worker thread and cleans up
   ///          resources.
-  virtual ~Worker() {
+  ~Worker() {
     shutdown();
   }
 
   /// @brief Shut down and join the worker thread.
   void shutdown() {
     shutdown_ = true;
-    message_queue_->shutdown();
-    if (worker_thread_.joinable()) {
-      worker_thread_.join();
-    }
-  }
-
- private:
-  /// @brief Run the worker thread.
-  /// @details This function runs the worker thread, waiting for messages to
-  ///          arrive in the queue and calling the user-defined callback.
-  /// @throw std::runtime_error, if an error occurs during processing.
-  void run() {
-    while (!shutdown_) {
-      auto message = message_queue_->wait_and_pop();
-      if (message.has_value()) {
-        message_cb_(message.value());
+    tasks_.shutdown();
+    for (auto&& thread : threads_) {
+      if (thread.joinable()) {
+        thread.join();
       }
     }
   }
 
+  /// @brief Push a task to the worker thread.
+  template <typename F, typename... Args>
+  std::future<typename std::result_of<F(Args...)>::type> push(F&& f,
+                                                              Args&&... args) {
+    using return_type = typename std::result_of<F(Args...)>::type;
+
+    auto task = std::make_shared<std::packaged_task<return_type()>>(
+        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
+    std::future<return_type> res = task->get_future();
+    tasks_.push([task]() { (*task)(); });
+    return res;
+  }
+
+ private:
+  /// @brief Run the worker.
+  /// @details This function runs the worker, waiting for messages to
+  void run() {
+    for (auto&& thread : threads_) {
+      thread = std::thread([this] {
+        while (!shutdown_) {
+          while (tasks_.try_pop() == std::nullopt) {
+            std::this_thread::yield();
+          }
+          auto task = std::move(tasks_.pop());
+          task();
+        }
+      });
+    }
+  }
+
   std::atomic<bool> shutdown_{false};
-  std::shared_ptr<AsyncQueue<MessageT>> message_queue_;
-  std::function<void(MessageT const&)> message_cb_;
-  std::thread worker_thread_;
+  std::vector<std::thread> threads_;
+  AsyncQueue<std::function<void()>> tasks_;
 };
 
 }  // namespace simpleio

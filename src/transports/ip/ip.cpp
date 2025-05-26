@@ -13,7 +13,7 @@ IoWorker::IoWorker()
       executor_(std::make_shared<simpleio::Worker>(1)) {
   BOOST_LOG_TRIVIAL(debug) << "Created IoWorker with shared io_context";
   BOOST_LOG_TRIVIAL(debug) << "Starting io_context thread";
-  // Prevent io_context from exiting when idle
+  // Prevent io_context from exiting when idle.
   lifecycle_manager_ = std::make_unique<
       basio::executor_work_guard<boost::asio::io_context::executor_type>>(
       scheduler_->get_executor());

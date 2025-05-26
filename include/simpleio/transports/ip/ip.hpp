@@ -22,6 +22,9 @@ namespace simpleio::transports::ip {
 enum class Scheme { TCP, TLS, UDP, UDP_BROADCAST, UDP_MULTICAST };
 
 /// @brief IO worker.
+/// @details An IoWorker sets up a shared task scheduler, lifecycle manager,
+///          and callback executor for sending and receiving messages over
+///          network interfaces within a single process.
 class IoWorker {
  public:
   /// @brief Constructor.
@@ -37,6 +40,10 @@ class IoWorker {
   /// @return The shared task scheduler.
   [[nodiscard]] std::shared_ptr<boost::asio::io_context> scheduler() const;
 
+  /// @brief Get the shared callback executor.
+  /// @details Senders and Receivers within the same process should share the
+  ///          same executor to ensure that the same thread is used for
+  ///          processing callbacks with received messages.
   [[nodiscard]] std::shared_ptr<simpleio::Worker> executor() const;
 
  private:
@@ -48,6 +55,11 @@ class IoWorker {
   std::thread scheduler_thread_;
 };
 
+/// @brief Options for creating a sender.
+/// @details This struct holds the options for creating a sender, including the
+///          remote IP address, remote port, TLS configuration (if applicable),
+///          hops (for UDP_MULTICAST), loopback (for UDP_MULTICAST), and
+///          IPv6 interface (for UDP_MULTICAST).
 struct SenderOptions {
   std::string remote_ip;
   uint16_t remote_port;
@@ -57,6 +69,15 @@ struct SenderOptions {
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
 };
 
+/// @brief Factory function to create a sender.
+/// @details This function creates a sender based on the specified scheme and
+///          options.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (TCP, TLS, UDP, etc.).
+/// @param options, the options for creating the sender.
+/// @return A shared pointer to the created sender.
+/// @tparam MessageT, the type of message to send.
+/// @throw TransportException, if an error occurs during sender creation.
 // NOLINTBEGIN [build/namespaces]
 template <typename MessageT>
 std::shared_ptr<Sender<MessageT>> make_sender(
@@ -150,6 +171,10 @@ std::shared_ptr<Sender<MessageT>> make_sender(
   }
 }
 
+/// @brief Options for creating a receiver.
+/// @details This struct holds the options for creating a receiver, including
+///          the local IP address, local port, TLS configuration (if
+///          applicable), and IPv6 interface (for UDP_MULTICAST).
 struct ReceiverOptions {
   std::optional<std::string> local_ip;
   uint16_t local_port;
@@ -157,6 +182,21 @@ struct ReceiverOptions {
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
 };
 
+/// @brief Factory function to create a receiver.
+/// @details This function creates a receiver based on the specified scheme,
+///         options, and message callback to execute when a message is received.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (TCP, TLS, UDP, etc.).
+/// @param message_cb, the callback function to call when a message is
+///                    received. The function must not modify shared state
+///                    without protecting concurrent accesses and must not
+///                    throw exceptions.
+/// @param options, the options for creating the receiver.
+/// @return A shared pointer to the created receiver.
+/// @tparam MessageT, the type of message to receive.
+/// @tparam F, the type of callback function to execute when a message is
+///         received.
+/// @throw TransportException, if an error occurs during receiver creation.
 // NOLINTBEGIN [build/namespaces]
 template <typename MessageT, typename F = std::function<void(MessageT const&)>>
 std::shared_ptr<Receiver<MessageT>> make_receiver(

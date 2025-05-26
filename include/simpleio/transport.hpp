@@ -22,8 +22,7 @@ class TransportException : public std::runtime_error {
 };
 
 /// @brief Message sender
-/// @details This class is responsible for sending messages of type MessageT
-///          using a SendStrategy object.
+/// @details This class is responsible for sending messages of type MessageT.
 /// @tparam MessageT, the type of message to send.
 template <typename MessageT>
 class Sender {
@@ -40,8 +39,10 @@ class Sender {
 };
 
 /// @brief Message receiver
-/// @details This class is responsible for receiving messages of type MessageT
-///          using a ReceiveStrategy object.
+/// @details This class is responsible for receiving messages of type MessageT.
+/// @tparam MessageT, the type of message to receive.
+/// @tparam F, the type of callback function to call when a message is
+/// received. Defaults to std::function<void(MessageT const&)>
 template <typename MessageT, typename F = std::function<void(MessageT const&)>>
 class Receiver {
  public:
@@ -55,8 +56,11 @@ class Receiver {
 
   /// @brief Constructor.
   /// @param message_cb, the callback function to call when a message is
-  ///                    received.
+  ///                    received. The function must not modify shared state
+  ///                    without protecting concurrent accesses and must not
+  ///                    throw exceptions.
   /// @param worker, the worker to use for processing messages.
+  /// @throws TransportException, if the message callback or worker is null.
   explicit Receiver(callback_t message_cb, std::shared_ptr<Worker> worker)
       : message_cb_(std::move(message_cb)), worker_(std::move(worker)) {
     if (!message_cb_) {
@@ -71,6 +75,11 @@ class Receiver {
   virtual ~Receiver() = default;
 
  protected:
+  /// @brief Handle a received message.
+  /// @details This function is called when a message is received.
+  ///          It pushes the message to the worker for processing.
+  ///          This method should not throw exceptions.
+  /// @param message, the received message.
   void on_read(MessageT const& message) {
     callback_futures_.push(worker_->push(
         [this](message_t const& msg) -> callback_return_t {

@@ -59,17 +59,17 @@ class Worker {
   /// @brief Push a task to the worker thread.
   /// @tparam F, the type of the function to execute.
   /// @tparam Args, the types of the arguments to pass to the function.
-  /// @param f, the function to execute.
+  /// @param func, the function to execute.
   /// @param args, the arguments to pass to the function.
   /// @return a future that will hold the result of the
   ///         function execution.
   template <typename F, typename... Args>
-  std::future<typename std::result_of<F(Args...)>::type> push(F&& f,
+  std::future<typename std::result_of<F(Args...)>::type> push(F&& func,
                                                               Args&&... args) {
     using return_type = typename std::result_of<F(Args...)>::type;
 
     auto task = std::make_shared<std::packaged_task<return_type()>>(
-        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        std::bind(std::forward<F>(func), std::forward<Args>(args)...));
 
     std::future<return_type> res = task->get_future();
     tasks_.push([task]() { (*task)(); });

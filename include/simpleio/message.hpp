@@ -130,8 +130,9 @@ class Message {
   template <typename U = SerializerT,
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
-  explicit Message(std::string const& _blob,
-                   std::shared_ptr<serializer_t> strategy)
+  explicit Message(
+      std::string const& _blob,  // NOLINT [modernize-pass-by-value]
+      std::shared_ptr<serializer_t> strategy)
       : strategy_(std::move(strategy)), blob_(_blob) {
     entity_init();
   }
@@ -158,7 +159,8 @@ class Message {
   template <typename U = SerializerT,
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
-  explicit Message(std::string const& _blob)
+  explicit Message(
+      std::string const& _blob)  // NOLINT [modernize-pass-by-value]
       : strategy_(std::make_shared<serializer_t>()), blob_(_blob) {
     entity_init();
   }

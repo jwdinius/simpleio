@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <boost/asio.hpp>
+#include <boost/log/trivial.hpp>
 #include <memory>
 #include <string>
 #include <utility>
@@ -11,6 +12,9 @@
 namespace simpleio::transports::ip {
 
 /// @brief Strategy for sending messages over TCP
+/// @details This class uses a TCP socket to send messages of type MessageT
+///          to a specified remote endpoint.
+/// @tparam MessageT, the type of message to send.
 template <typename MessageT>
 class TcpSender : public Sender<MessageT> {
  public:
@@ -21,6 +25,10 @@ class TcpSender : public Sender<MessageT> {
                      boost::asio::ip::tcp::endpoint remote_endpoint)
       : socket_(*io_ctx), remote_endpoint_(std::move(remote_endpoint)) {}
 
+  /// @brief Send a message.
+  /// @details This method connects to the remote endpoint and sends the message
+  ///          asynchronously.
+  /// @param msg, the message to send.
   void send(MessageT const& msg) override {
     connect();
     auto const& blob = msg.blob();
@@ -39,6 +47,7 @@ class TcpSender : public Sender<MessageT> {
   }
 
  private:
+  /// @brief Connect to the remote endpoint.
   void connect() {
     BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
     boost::system::error_code err_code;
@@ -56,13 +65,23 @@ class TcpSender : public Sender<MessageT> {
 };
 
 /// @brief Strategy for receiving messages over TCP
+/// @details This class uses a TCP socket to receive messages of type MessageT
+///          from a specified remote endpoint. Messages received are processed
+///          by a callback function.
+/// @tparam MessageT, the type of message to receive.
+/// @tparam F, the type of callback function to execute when a message is
+///          received.
 template <typename MessageT, typename F = std::function<void(MessageT const&)>>
 class TcpReceiver : public Receiver<MessageT, F> {
  public:
-  /// @brief Construct from a shared io_context, a local endpoint, and a maximum
-  /// blob size.
+  /// @brief Construct from a shared io_context and a local endpoint
   /// @param io_ctx, the shared io_context.
   /// @param local_endpoint, local endpoint to listen on.
+  /// @param message_cb, the callback function to call when a message is
+  ///                    received. The function must not modify shared state
+  ///                    without protecting concurrent accesses and must not
+  ///                    throw exceptions.
+  /// @param worker, the worker to use for processing messages.
   explicit TcpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                        boost::asio::ip::tcp::endpoint const& local_endpoint,
                        F message_cb,
@@ -72,6 +91,10 @@ class TcpReceiver : public Receiver<MessageT, F> {
     start_accepting();
   }
 
+  /// @brief Destructor
+  /// @details This destructor closes the acceptor socket to stop accepting new
+  ///          connections.
+  /// @throw std::exception, if an error occurs while closing the acceptor.
   ~TcpReceiver() {
     try {
       acceptor_.close();
@@ -81,6 +104,10 @@ class TcpReceiver : public Receiver<MessageT, F> {
   }
 
  private:
+  /// @brief Start accepting incoming connections.
+  /// @details This method sets up an asynchronous accept operation to listen
+  ///          for incoming connections. When a connection is accepted, it
+  ///          starts receiving messages from the connected socket.
   void start_accepting() {
     auto socket = std::make_shared<boost::asio::ip::tcp::socket>(
         acceptor_.get_executor());
@@ -97,6 +124,9 @@ class TcpReceiver : public Receiver<MessageT, F> {
         });
   }
 
+  /// @brief  Start receiving messages from a socket provisioned to receive
+  /// them.
+  /// @param socket, a shared pointer to the socket to receive messages from.
   void start_receiving(
       std::shared_ptr<boost::asio::ip::tcp::socket> const& socket) {
     auto buffer = std::make_shared<std::string>(MessageT::max_blob_size, '\0');

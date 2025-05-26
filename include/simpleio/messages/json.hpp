@@ -15,7 +15,7 @@ using JsonMessageType = nlohmann::json;
 /// @brief Serialize and deserialize JSON messages.
 /// @details JSON messages are serialized and deserialized using nlohmann/json
 /// library.
-class JsonSerializer : public SerializationStrategy<JsonMessageType> {
+class JsonSerializer : public Serializer<JsonMessageType> {
  public:
   /// @brief Serialize an nlohmann/json object into a string.
   /// @param entity, the nlohmann/json object to serialize.

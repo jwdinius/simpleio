@@ -19,26 +19,20 @@ TEST(JsonMessageTest, TestPackUnpackNominal) {
   json_obj["id"] = 1;
   json_obj["contents"] = "Hello, world!";
 
-  auto strategy = std::make_shared<siomsg::JsonSerializer>();
-  auto json_msg = std::make_shared<sio::Message<siomsg::JsonMessageType>>(
-      json_obj, strategy);
-  {
-    auto entity = json_msg->entity();
-    EXPECT_NE(entity, nullptr);
-  }
+  auto json_msg =
+      std::make_shared<sio::Message<siomsg::JsonSerializer>>(json_obj);
 
   // Copy the packed entity
   std::string serialized_json_msg{json_msg->blob()};
 
   // Create a new JsonMessage from the packed entity
   auto json_msg_from_serialized =
-      std::make_shared<sio::Message<siomsg::JsonMessageType>>(
-          std::move(serialized_json_msg), strategy);
+      std::make_shared<sio::Message<siomsg::JsonSerializer>>(
+          std::move(serialized_json_msg));
 
   // Verify the unpacked JSON object
   {
     auto entity = json_msg_from_serialized->entity();
-    EXPECT_NE(entity, nullptr);
     EXPECT_EQ(entity["id"], 1);
     EXPECT_EQ(entity["contents"], "Hello, world!");
   }

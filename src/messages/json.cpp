@@ -13,7 +13,7 @@ std::string siomsg::JsonSerializer::serialize(
   try {
     return entity.dump();
   } catch (nlohmann::json::exception& e) {
-    throw sio::SerializationError(e.what());
+    throw sio::SerializerError(e.what());
   }
 }
 
@@ -22,6 +22,6 @@ siomsg::JsonMessageType siomsg::JsonSerializer::deserialize(
   try {
     return nlohmann::json::parse(blob);
   } catch (nlohmann::json::exception& e) {
-    throw sio::SerializationError(e.what());
+    throw sio::SerializerError(e.what());
   }
 }

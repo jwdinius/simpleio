@@ -42,7 +42,7 @@ static constexpr const char* TEST_IPV6_MULTICAST_ADDR = "ff02::1";
 static constexpr uint16_t TEST_PORT_NUM = 12345;
 static constexpr size_t MAX_ITERS = 10;
 
-class SimpleStringSerializer : public sio::SerializationStrategy<std::string> {
+class SimpleStringSerializer : public sio::Serializer<std::string> {
  public:
   std::string serialize(std::string const& entity) override {
     return entity;
@@ -53,23 +53,17 @@ class SimpleStringSerializer : public sio::SerializationStrategy<std::string> {
   }
 };
 
-class SimpleString : public sio::Message<std::string> {
+class SimpleString : public sio::Message<SimpleStringSerializer> {
  public:
-  explicit SimpleString(
-      std::shared_ptr<sio::SerializationStrategy<std::string>> serializer)
-      : sio::Message<std::string>("Hello, World!", std::move(serializer)) {}
+  SimpleString() : sio::Message<SimpleStringSerializer>("Hello, World!") {}
 
-  SimpleString(
-      std::string const& blob,
-      std::shared_ptr<sio::SerializationStrategy<std::string>> serializer)
-      : sio::Message<std::string>(blob, std::move(serializer)) {}
+  explicit SimpleString(std::string const& blob)
+      : sio::Message<SimpleStringSerializer>(blob) {}
 };
 
 class TestNetworkTransport : public ::testing::Test {
  public:
-  TestNetworkTransport()
-      : string_serializer_(std::make_shared<SimpleStringSerializer>()),
-        message_(string_serializer_) {
+  TestNetworkTransport() : message_() {
     BOOST_LOG_TRIVIAL(debug) << "TestNetworkTransport constructor";
 
     /// @brief Callback function to handle received messages.
@@ -110,7 +104,6 @@ class TestNetworkTransport : public ::testing::Test {
   }
 
  protected:
-  std::shared_ptr<SimpleStringSerializer> string_serializer_;
   SimpleString message_;
   size_t num_calls_{0};
   std::mutex mutex_;
@@ -125,8 +118,7 @@ TEST_F(TestNetworkTransport, TestTcpIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TCP, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::TCP, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
@@ -140,8 +132,7 @@ TEST_F(TestNetworkTransport, TestTcpIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TCP, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::TCP, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
@@ -161,8 +152,7 @@ TEST_F(TestNetworkTransport, TestTlsIPv4) {
           .key_file =
               std::filesystem::path(CERTS_PATH) / "private/receiver.key"}};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TLS, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::TLS, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{
       .remote_ip = TEST_IPV4_ADDR,
       .remote_port = TEST_PORT_NUM,
@@ -188,8 +178,7 @@ TEST_F(TestNetworkTransport, TestTlsIPv6) {
           .key_file =
               std::filesystem::path(CERTS_PATH) / "private/receiver.key"}};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::TLS, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::TLS, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{
       .remote_ip = TEST_IPV6_ADDR,
       .remote_port = TEST_PORT_NUM,
@@ -209,8 +198,7 @@ TEST_F(TestNetworkTransport, TestUdpIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
@@ -224,8 +212,7 @@ TEST_F(TestNetworkTransport, TestUdpIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP, string_serializer_, message_cb_,
-      rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
@@ -238,8 +225,7 @@ TEST_F(TestNetworkTransport, TestUdpIPv6) {
 TEST_F(TestNetworkTransport, TestUdpBroadcastIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, string_serializer_,
-      message_cb_, rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_BROADCAST_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   auto sndr = siotrns::ip::make_sender<SimpleString>(
@@ -253,8 +239,7 @@ TEST_F(TestNetworkTransport, TestUdpBroadcastIPv4) {
 TEST_F(TestNetworkTransport, TestUdpBroadcastIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, string_serializer_,
-      message_cb_, rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, message_cb_, rcvr_opts);
   auto sndr_opts = siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
                                               .remote_port = TEST_PORT_NUM};
   EXPECT_THROW(siotrns::ip::make_sender<SimpleString>(
@@ -267,8 +252,7 @@ TEST_F(TestNetworkTransport, TestUdpMulticastIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV4_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, string_serializer_,
-      message_cb_, rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, message_cb_, rcvr_opts);
   auto sndr_opts =
       siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_MULTICAST_ADDR,
                                  .remote_port = TEST_PORT_NUM,
@@ -288,8 +272,7 @@ TEST_F(TestNetworkTransport, TestUdpMulticastIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV6_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
-      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, string_serializer_,
-      message_cb_, rcvr_opts);
+      io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, message_cb_, rcvr_opts);
   auto sndr_opts =
       siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_MULTICAST_ADDR,
                                  .remote_port = TEST_PORT_NUM,

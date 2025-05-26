@@ -23,9 +23,8 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   event->setAttribute("contents", "Hello, world!");
   doc->appendChild(event);
 
-  auto strategy = std::make_shared<siomsg::XmlSerializer>();
-  auto xml_msg = std::make_shared<sio::Message<siomsg::XmlMessageType>>(
-      std::move(doc), strategy);
+  auto xml_msg =
+      std::make_shared<sio::Message<siomsg::XmlSerializer>>(std::move(doc));
   {
     auto entity = xml_msg->entity();
     EXPECT_NE(entity, nullptr);
@@ -41,8 +40,8 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
 
   // Create a new XmlMessage from the packed entity
   auto xml_msg_from_serialized =
-      std::make_shared<sio::Message<siomsg::XmlMessageType>>(
-          std::move(serialized_xml_msg), strategy);
+      std::make_shared<sio::Message<siomsg::XmlSerializer>>(
+          std::move(serialized_xml_msg));
 
   // Verify the unpacked XML document
   {

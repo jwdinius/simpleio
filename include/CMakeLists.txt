@@ -5,7 +5,18 @@ target_sources(base
       simpleio/async_queue.hpp
       simpleio/message.hpp
       simpleio/transport.hpp
+)
+
+target_sources(worker
+  INTERFACE
+    FILE_SET HEADERS
+    FILES
       simpleio/worker.hpp
+)
+
+target_link_libraries(worker
+  INTERFACE
+    base
 )
 
 target_sources(messages_xml
@@ -41,9 +52,9 @@ target_sources(transports_ip
       simpleio/transports/ip/ip.hpp
       simpleio/transports/ip/tcp.hpp
       simpleio/transports/ip/tls.hpp
-      simpleio/transports/ip/udp.hpp
+#      simpleio/transports/ip/udp.hpp
 )
-
+#
 target_link_libraries(transports_ip
   PUBLIC
     base

@@ -24,7 +24,7 @@ std::string siomsg::XmlSerializer::serialize(
 
     return oss.str();
   } catch (Poco::Exception& e) {
-    throw sio::SerializationError(e.what());
+    throw sio::SerializerError(e.what());
   }
 }
 
@@ -36,6 +36,6 @@ siomsg::XmlMessageType siomsg::XmlSerializer::deserialize(
     Poco::XML::InputSource input_source(iss);
     return parser.parse(&input_source);
   } catch (Poco::Exception& e) {
-    throw sio::SerializationError(e.what());
+    throw sio::SerializerError(e.what());
   }
 }

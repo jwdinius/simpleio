@@ -14,6 +14,7 @@
 #include "simpleio/transports/ip/tcp.hpp"
 #include "simpleio/transports/ip/tls.hpp"
 #include "simpleio/transports/ip/udp.hpp"
+#include "simpleio/worker.hpp"
 
 namespace simpleio::transports::ip {
 
@@ -21,6 +22,9 @@ namespace simpleio::transports::ip {
 enum class Scheme { TCP, TLS, UDP, UDP_BROADCAST, UDP_MULTICAST };
 
 /// @brief IO worker.
+/// @details An IoWorker sets up a shared task scheduler, lifecycle manager,
+///          and callback executor for sending and receiving messages over
+///          network interfaces within a single process.
 class IoWorker {
  public:
   /// @brief Constructor.
@@ -34,17 +38,28 @@ class IoWorker {
   ///          same task scheduler to ensure that the same thread is used for
   ///          sharing data with other processes over a network interface.
   /// @return The shared task scheduler.
-  [[nodiscard]] std::shared_ptr<boost::asio::io_context> get_task_scheduler()
-      const;
+  [[nodiscard]] std::shared_ptr<boost::asio::io_context> scheduler() const;
+
+  /// @brief Get the shared callback executor.
+  /// @details Senders and Receivers within the same process should share the
+  ///          same executor to ensure that the same thread is used for
+  ///          processing callbacks with received messages.
+  [[nodiscard]] std::shared_ptr<simpleio::Worker> executor() const;
 
  private:
-  std::shared_ptr<boost::asio::io_context> task_scheduler_;
+  std::shared_ptr<boost::asio::io_context> scheduler_;
+  std::shared_ptr<simpleio::Worker> executor_;
   std::unique_ptr<
       boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>
       lifecycle_manager_;
-  std::thread worker_;
+  std::thread scheduler_thread_;
 };
 
+/// @brief Options for creating a sender.
+/// @details This struct holds the options for creating a sender, including the
+///          remote IP address, remote port, TLS configuration (if applicable),
+///          hops (for UDP_MULTICAST), loopback (for UDP_MULTICAST), and
+///          IPv6 interface (for UDP_MULTICAST).
 struct SenderOptions {
   std::string remote_ip;
   uint16_t remote_port;
@@ -54,39 +69,45 @@ struct SenderOptions {
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
 };
 
+/// @brief Factory function to create a sender.
+/// @details This function creates a sender based on the specified scheme and
+///          options.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (TCP, TLS, UDP, etc.).
+/// @param options, the options for creating the sender.
+/// @return A shared pointer to the created sender.
+/// @tparam MessageT, the type of message to send.
+/// @throw TransportException, if an error occurs during sender creation.
 // NOLINTBEGIN [build/namespaces]
 template <typename MessageT>
 std::shared_ptr<Sender<MessageT>> make_sender(
     std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
     SenderOptions const& options) {
   // NOLINTEND [build/namespaces]
-  auto io_ctx = io_wrkr->get_task_scheduler();
+  auto io_ctx = io_wrkr->scheduler();
   switch (scheme) {
     case Scheme::TCP: {
-      auto sndr_strategy = std::make_shared<TcpSendStrategy>(
+      return std::make_shared<TcpSender<MessageT>>(
           io_ctx, boost::asio::ip::tcp::endpoint(
                       boost::asio::ip::address::from_string(options.remote_ip),
                       options.remote_port));
-      return std::make_shared<Sender<MessageT>>(sndr_strategy);
     }
     case Scheme::TLS: {
       if (!options.tls_config) {
         throw TransportException("TLS config is required for TLS scheme");
       }
-      auto tls_sndr_strategy = std::make_shared<TlsSendStrategy>(
+      return std::make_shared<TlsSender<MessageT>>(
           io_ctx, options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.remote_ip),
               options.remote_port));
-      return std::make_shared<Sender<MessageT>>(tls_sndr_strategy);
     }
     case Scheme::UDP: {
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
-      auto udp_sndr_strategy = std::make_shared<UdpSendStrategy>(
+      return std::make_shared<UdpSender<MessageT>>(
           socket, boost::asio::ip::udp::endpoint(
                       boost::asio::ip::address::from_string(options.remote_ip),
                       options.remote_port));
-      return std::make_shared<Sender<MessageT>>(udp_sndr_strategy);
     }
     case Scheme::UDP_BROADCAST: {
       auto addr = boost::asio::ip::make_address(options.remote_ip);
@@ -101,8 +122,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       auto endpoint =
           boost::asio::ip::udp::endpoint(addr.to_v4(), options.remote_port);
 
-      auto strategy = std::make_shared<UdpSendStrategy>(socket, endpoint);
-      return std::make_shared<Sender<MessageT>>(strategy);
+      return std::make_shared<UdpSender<MessageT>>(socket, endpoint);
     }
     case Scheme::UDP_MULTICAST: {
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
@@ -143,8 +163,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       socket->set_option(boost::asio::ip::multicast::enable_loopback(
           options.loopback.value()));
 
-      auto strategy = std::make_shared<UdpSendStrategy>(socket, endpoint);
-      return std::make_shared<Sender<MessageT>>(strategy);
+      return std::make_shared<UdpSender<MessageT>>(socket, endpoint);
     }
     default:
       throw TransportException("Control fell through for make_sender" +
@@ -152,6 +171,10 @@ std::shared_ptr<Sender<MessageT>> make_sender(
   }
 }
 
+/// @brief Options for creating a receiver.
+/// @details This struct holds the options for creating a receiver, including
+///          the local IP address, local port, TLS configuration (if
+///          applicable), and IPv6 interface (for UDP_MULTICAST).
 struct ReceiverOptions {
   std::optional<std::string> local_ip;
   uint16_t local_port;
@@ -159,30 +182,40 @@ struct ReceiverOptions {
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
 };
 
+/// @brief Factory function to create a receiver.
+/// @details This function creates a receiver based on the specified scheme,
+///         options, and message callback to execute when a message is received.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (TCP, TLS, UDP, etc.).
+/// @param message_cb, the callback function to call when a message is
+///                    received. The function must not modify shared state
+///                    without protecting concurrent accesses and must not
+///                    throw exceptions.
+/// @param options, the options for creating the receiver.
+/// @return A shared pointer to the created receiver.
+/// @tparam MessageT, the type of message to receive.
+/// @tparam F, the type of callback function to execute when a message is
+///         received.
+/// @throw TransportException, if an error occurs during receiver creation.
 // NOLINTBEGIN [build/namespaces]
-template <typename MessageT>
-std::unique_ptr<Receiver<MessageT>> make_receiver(
+template <typename MessageT, typename F = std::function<void(MessageT const&)>>
+std::shared_ptr<Receiver<MessageT>> make_receiver(
     std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
-    std::shared_ptr<
-        SerializationStrategy<typename MessageT::entity_type>> const&
-        serializer,
-    std::function<void(MessageT const&)> message_cb,
-    ReceiverOptions const& options) {
+    F message_cb, ReceiverOptions const& options) {
   // NOLINTEND [build/namespaces]
-  auto io_ctx = io_wrkr->get_task_scheduler();
+  auto io_ctx = io_wrkr->scheduler();
+  auto callback_handler = io_wrkr->executor();
   switch (scheme) {
     case Scheme::TCP: {
       if (!options.local_ip) {
         throw TransportException("Local IP is required for TCP scheme");
       }
-      auto strategy = std::make_shared<TcpReceiveStrategy>(
+      return std::make_shared<TcpReceiver<MessageT>>(
           io_ctx,
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          MessageT::max_blob_size);
-      return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                  message_cb);
+          message_cb, callback_handler);
     }
     case Scheme::TLS: {
       if (!options.local_ip) {
@@ -191,14 +224,12 @@ std::unique_ptr<Receiver<MessageT>> make_receiver(
       if (!options.tls_config) {
         throw TransportException("TLS config is required for TLS scheme");
       }
-      auto strategy = std::make_shared<TlsReceiveStrategy>(
+      return std::make_shared<TlsReceiver<MessageT>>(
           io_ctx, options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          MessageT::max_blob_size);
-      return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                  message_cb);
+          message_cb, callback_handler);
     }
     case Scheme::UDP: {
       if (!options.local_ip) {
@@ -209,20 +240,16 @@ std::unique_ptr<Receiver<MessageT>> make_receiver(
           boost::asio::ip::udp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port));
-      auto strategy = std::make_shared<UdpReceiveStrategy>(
-          std::move(socket), MessageT::max_blob_size);
-      return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                  message_cb);
+      return std::make_shared<UdpReceiver<MessageT>>(
+          std::move(socket), message_cb, callback_handler);
     }
     case Scheme::UDP_BROADCAST: {
       // listen on all interfaces: 0.0.0.0
       auto socket = std::make_unique<boost::asio::ip::udp::socket>(
           *io_ctx, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(),
                                                   options.local_port));
-      auto strategy = std::make_shared<UdpReceiveStrategy>(
-          std::move(socket), MessageT::max_blob_size);
-      return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                  message_cb);
+      return std::make_shared<UdpReceiver<MessageT>>(
+          std::move(socket), message_cb, callback_handler);
     }
     case Scheme::UDP_MULTICAST: {
       // Parse and validate the address
@@ -252,11 +279,8 @@ std::unique_ptr<Receiver<MessageT>> make_receiver(
         socket->set_option(boost::asio::ip::multicast::join_group(
             multicast_addr.to_v6(), options.ipv6_interface.value_or(0)));
 
-        auto strategy = std::make_shared<UdpReceiveStrategy>(
-            std::move(socket), MessageT::max_blob_size);
-
-        return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                    message_cb);
+        return std::make_shared<UdpReceiver<MessageT>>(
+            std::move(socket), message_cb, callback_handler);
       }
       auto socket = std::make_unique<boost::asio::ip::udp::socket>(*io_ctx);
       socket->open(boost::asio::ip::udp::v4());
@@ -270,10 +294,8 @@ std::unique_ptr<Receiver<MessageT>> make_receiver(
       socket->set_option(
           boost::asio::ip::multicast::join_group(multicast_addr.to_v4()));
 
-      auto strategy = std::make_shared<UdpReceiveStrategy>(
-          std::move(socket), MessageT::max_blob_size);
-      return std::make_unique<Receiver<MessageT>>(strategy, serializer,
-                                                  message_cb);
+      return std::make_shared<UdpReceiver<MessageT>>(
+          std::move(socket), message_cb, callback_handler);
     }
     default:
       throw TransportException("Control fell through for make_receiver" +

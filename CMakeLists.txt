@@ -14,6 +14,10 @@ find_package(OpenSSL 3 REQUIRED)
 add_library(base INTERFACE)
 add_library(${PROJECT_NAME}::base ALIAS base)
 
+# Worker class
+add_library(worker INTERFACE)
+add_library(${PROJECT_NAME}::worker ALIAS worker)
+
 # Message classes
 add_library(messages_xml SHARED)
 add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
@@ -45,6 +49,7 @@ install(
     messages_xml
     messages_json
     transports_ip
+    worker
   EXPORT ${PROJECT_NAME}Targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -14,25 +14,11 @@
 #include "simpleio/worker.hpp"
 
 namespace simpleio {
-
+/// @brief Exception thrown when a transport error occurs at runtime.
 class TransportException : public std::runtime_error {
  public:
   explicit TransportException(std::string const& what)
       : std::runtime_error(what) {}
-};
-
-/// @brief Strategy for sending messages.
-/// @details Implementations of this class are responsible for sending messages
-///          over a system interface (e.g., network, serial, etc.).
-class SendStrategy {
- public:
-  /// @brief Declare default destructor to allow inheritance.
-  virtual ~SendStrategy() = default;
-
-  /// @brief Send a string.
-  /// @param blob, the string to send.
-  /// @throw TransportException, if an error occurs during sending.
-  virtual void send(std::string const& blob) = 0;
 };
 
 /// @brief Message sender
@@ -42,88 +28,60 @@ class SendStrategy {
 template <typename MessageT>
 class Sender {
  public:
-  /// @brief Default constructor deleted.
-  Sender() = delete;
+  using message_t = MessageT;
 
-  /// @brief Construct from a SendStrategy object.
-  /// @param strategy, the SendStrategy object to use.
-  explicit Sender(std::shared_ptr<SendStrategy> strategy)
-      : strategy_(std::move(strategy)) {}
-
-  ~Sender() = default;
+  /// @brief Default destructor.
+  virtual ~Sender() = default;
 
   /// @brief Send a message.
   /// @param message, the message to send.
   /// @throw TransportException, if an error occurs during sending.
-  void send(MessageT const& message) {
-    strategy_->send(message.blob());
-  }
-
- private:
-  std::shared_ptr<SendStrategy> strategy_;
-};
-
-/// @brief Strategy for receiving messages.
-/// @details Implementations of this class are responsible for receiving
-/// messages
-///          over a system interface (e.g., network, serial, etc.).
-class ReceiveStrategy {
- public:
-  ReceiveStrategy() = default;
-
-  /// @brief Declare default destructor to allow inheritance.
-  virtual ~ReceiveStrategy() = default;
-
-  void set_event_callback(
-      std::function<void(std::string const&)> const& event_cb) {
-    event_cb_ = event_cb;
-  }
-
- protected:
-  std::function<void(std::string const&)> event_cb_;
+  virtual void send(MessageT const& msg) = 0;
 };
 
 /// @brief Message receiver
 /// @details This class is responsible for receiving messages of type MessageT
 ///          using a ReceiveStrategy object.
-template <typename MessageT>
+template <typename MessageT, typename F = std::function<void(MessageT const&)>>
 class Receiver {
  public:
+  using message_t = MessageT;
+  using callback_t = F;
+  using callback_return_t =
+      typename std::result_of<callback_t(message_t const&)>::type;
+
   /// @brief Default constructor deleted.
   Receiver() = delete;
 
   /// @brief Constructor.
-  /// @param strategy, the ReceiveStrategy object to use.
-  /// @param serializer, the SerializationStrategy object to use.
   /// @param message_cb, the callback function to call when a message is
   ///                    received.
-  explicit Receiver(
-      std::shared_ptr<ReceiveStrategy> strategy,
-      std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
-          serializer,
-      std::function<void(MessageT const&)> message_cb)
-      : strategy_(std::move(strategy)),
-        serializer_(std::move(serializer)),
-        event_queue_(std::make_shared<AsyncQueue<MessageT>>()) {
-    strategy_->set_event_callback([this](std::string const& blob) {
-      auto message = MessageT(blob, serializer_);
-      event_queue_->push(message);
-    });
-    worker_ = std::make_unique<Worker<MessageT>>(event_queue_, message_cb);
+  /// @param worker, the worker to use for processing messages.
+  explicit Receiver(callback_t message_cb, std::shared_ptr<Worker> worker)
+      : message_cb_(std::move(message_cb)), worker_(std::move(worker)) {
+    if (!message_cb_) {
+      throw TransportException("Message callback cannot be null.");
+    }
+    if (!worker_) {
+      throw TransportException("Worker cannot be null.");
+    }
   }
 
   /// @brief Destructor for the Receiver class.
-  /// @details This destructor shuts down the worker thread and cleans up
-  ///          resources.
-  ~Receiver() {
-    worker_->shutdown();
+  virtual ~Receiver() = default;
+
+ protected:
+  void on_read(MessageT const& message) {
+    callback_futures_.push(worker_->push(
+        [this](message_t const& msg) -> callback_return_t {
+          return message_cb_(msg);
+        },
+        message));
   }
 
  private:
-  std::shared_ptr<ReceiveStrategy> strategy_;
-  std::shared_ptr<SerializationStrategy<typename MessageT::entity_type>>
-      serializer_;
-  std::shared_ptr<AsyncQueue<MessageT>> event_queue_;
-  std::unique_ptr<Worker<MessageT>> worker_;
+  callback_t message_cb_;
+  std::shared_ptr<Worker> worker_;
+  AsyncQueue<std::future<callback_return_t>> callback_futures_;
 };
 }  // namespace simpleio

@@ -40,19 +40,19 @@ file(GENERATE
   CONTENT "inline constexpr char CERTS_PATH[] = \"${CERTS_PATH}\";  //NOLINT"
 )
 
-#add_executable(test_transports_ip test_transports_ip.cpp)  # Adjust the path to your test file
-#target_include_directories(test_transports_ip
-#  PRIVATE
-#    ${CMAKE_CURRENT_BINARY_DIR}
-#)
-#target_link_libraries(test_transports_ip
-#  PRIVATE
-#    ${GTEST_LIBRARIES}
-#    pthread
-#    Boost::system
-#    Boost::log
-#    Boost::log_setup
-#    ${PROJECT_NAME}::transports::ip
-#)
-#add_test(NAME test_transports_ip COMMAND test_transports_ip)
-#set_tests_properties(test_transports_ip PROPERTIES TIMEOUT 10)
+add_executable(test_transports_ip test_transports_ip.cpp)  # Adjust the path to your test file
+target_include_directories(test_transports_ip
+  PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(test_transports_ip
+  PRIVATE
+    ${GTEST_LIBRARIES}
+    pthread
+    Boost::system
+    Boost::log
+    Boost::log_setup
+    ${PROJECT_NAME}::transports::ip
+)
+add_test(NAME test_transports_ip COMMAND test_transports_ip)
+set_tests_properties(test_transports_ip PROPERTIES TIMEOUT 10)

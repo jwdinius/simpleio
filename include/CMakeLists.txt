@@ -4,8 +4,7 @@ target_sources(base
     FILES
       simpleio/async_queue.hpp
       simpleio/message.hpp
-      #simpleio/transport.hpp
-      simpleio/worker.hpp
+      simpleio/transport.hpp
 )
 
 target_sources(worker
@@ -40,25 +39,25 @@ target_sources(messages_json
       simpleio/messages/json.hpp
 )
 
-#target_link_libraries(messages_json
-#  PUBLIC
-#    base
-#    nlohmann_json::nlohmann_json
-#)
-#
-#target_sources(transports_ip
-#  PUBLIC
-#    FILE_SET HEADERS
-#    FILES
-#      simpleio/transports/ip/ip.hpp
-#      simpleio/transports/ip/tcp.hpp
-#      simpleio/transports/ip/tls.hpp
+target_link_libraries(messages_json
+  PUBLIC
+    base
+    nlohmann_json::nlohmann_json
+)
+
+target_sources(transports_ip
+  PUBLIC
+    FILE_SET HEADERS
+    FILES
+      simpleio/transports/ip/ip.hpp
+      simpleio/transports/ip/tcp.hpp
+      simpleio/transports/ip/tls.hpp
 #      simpleio/transports/ip/udp.hpp
-#)
+)
 #
-#target_link_libraries(transports_ip
-#  PUBLIC
-#    base
-#    Boost::system
-#    OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
-#)
+target_link_libraries(transports_ip
+  PUBLIC
+    base
+    Boost::system
+    OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
+)

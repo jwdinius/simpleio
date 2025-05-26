@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "simpleio/transport.hpp"
 
@@ -22,7 +23,8 @@ struct TlsConfig {
 };
 
 /// @brief Strategy for sending messages over TLS v1.3.
-class TlsSendStrategy : public SendStrategy {
+template <typename MessageT>
+class TlsSender : public Sender<MessageT> {
  public:
   /// @brief Construct from a shared io_context, a TLS configuration, and a
   /// remote endpoint.
@@ -31,17 +33,82 @@ class TlsSendStrategy : public SendStrategy {
   /// @param remote_endpoint, the remote endpoint to send to.
   /// @throw std::runtime_error, if an error occurs while setting up the SSL
   /// context.
-  explicit TlsSendStrategy(std::shared_ptr<boost::asio::io_context> io_ctx,
-                           TlsConfig const& tls_config,
-                           boost::asio::ip::tcp::endpoint remote_endpoint);
+  explicit TlsSender(std::shared_ptr<boost::asio::io_context> io_ctx,
+                     TlsConfig const& tls_config,
+                     boost::asio::ip::tcp::endpoint remote_endpoint)
+      : io_ctx_(std::move(io_ctx)),
+        remote_endpoint_(std::move(remote_endpoint)),
+        ssl_ctx_(boost::asio::ssl::context::tlsv13),
+        socket_(std::make_unique<
+                boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(
+            *io_ctx_, ssl_ctx_)) {
+    try {
+      ssl_ctx_.load_verify_file(tls_config.ca_file.string());
+      ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());
+      ssl_ctx_.use_private_key_file(tls_config.key_file.string(),
+                                    boost::asio::ssl::context::pem);
+    } catch (std::exception const& e) {
+      std::ostringstream error_stream;
+      error_stream << "Error setting up TLSv1.3 context: " << e.what();
+      BOOST_LOG_TRIVIAL(error) << error_stream.str();
+      throw std::runtime_error(error_stream.str());
+    }
+  }
 
-  /// @brief Send a string securely.
-  /// @param blob, the string to send.
-  void send(std::string const& blob) override;
+  void send(MessageT const& msg) override {
+    connect();
+    auto const& blob = msg.blob();
+    boost::asio::async_write(
+        *socket_, boost::asio::buffer(blob.data(), blob.size()),
+        [this](boost::system::error_code err_code, std::size_t bytes_sent) {
+          if (!err_code) {
+            BOOST_LOG_TRIVIAL(debug)
+                << "Sent " << bytes_sent << " bytes securely to "
+                << remote_endpoint_;
+          } else {
+            BOOST_LOG_TRIVIAL(error)
+                << "Error sending data: " << err_code.message();
+          }
+        });
+    close();
+  }
 
  private:
-  void connect();
-  void close();
+  void connect() {
+    BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
+    // Reset the socket to reuse the existing SSL context
+    socket_ = std::make_unique<
+        boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*io_ctx_,
+                                                                ssl_ctx_);
+    socket_->lowest_layer().open(remote_endpoint_.protocol());
+
+    // Attempt to establish a new connection
+    boost::system::error_code err_code;
+    socket_->lowest_layer().connect(remote_endpoint_, err_code);
+    if (!err_code) {
+      BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
+
+      // Perform TLS handshake
+      socket_->handshake(boost::asio::ssl::stream_base::client, err_code);
+      if (!err_code) {
+        BOOST_LOG_TRIVIAL(debug) << "TLSv1.3 Handshake successful!";
+      } else {
+        BOOST_LOG_TRIVIAL(error)
+            << "TLSv1.3 Handshake failed: " << err_code.message();
+      }
+    } else {
+      BOOST_LOG_TRIVIAL(error) << "Failed to connect: " << err_code.message();
+    }
+    BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
+  }
+
+  void close() {
+    BOOST_LOG_TRIVIAL(debug) << "Closing connection to " << remote_endpoint_;
+    boost::system::error_code err_code;
+    socket_->shutdown(err_code);
+    socket_.reset();
+    BOOST_LOG_TRIVIAL(debug) << "Closed connection to " << remote_endpoint_;
+  }
 
   std::shared_ptr<boost::asio::io_context> const io_ctx_;
   boost::asio::ssl::context ssl_ctx_;
@@ -51,7 +118,8 @@ class TlsSendStrategy : public SendStrategy {
 };
 
 /// @brief Strategy for receiving messages over TLS v1.3.
-class TlsReceiveStrategy : public ReceiveStrategy {
+template <typename MessageT, typename F = std::function<void(MessageT const&)>>
+class TlsReceiver : public Receiver<MessageT, F> {
  public:
   /// @brief Construct from a shared io_context, a TLS configuration, a local
   /// endpoint, and a maximum blob size.
@@ -61,24 +129,93 @@ class TlsReceiveStrategy : public ReceiveStrategy {
   /// @param max_blob_size, the maximum size of the allocated receive buffer.
   /// @throw std::runtime_error, if an error occurs while setting up the SSL
   /// context.
-  TlsReceiveStrategy(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                     TlsConfig const& tls_config,
-                     boost::asio::ip::tcp::endpoint const& local_endpoint,
-                     size_t const& max_blob_size);
+  TlsReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+              TlsConfig const& tls_config,
+              boost::asio::ip::tcp::endpoint const& local_endpoint,
+              F message_cb, std::shared_ptr<simpleio::Worker> const& worker)
+      : acceptor_(*io_ctx, local_endpoint),
+        ssl_ctx_(boost::asio::ssl::context::tlsv13),
+        Receiver<MessageT, F>(std::move(message_cb), worker) {
+    try {
+      ssl_ctx_.load_verify_file(tls_config.ca_file.string());
+      ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());
+      ssl_ctx_.use_private_key_file(tls_config.key_file.string(),
+                                    boost::asio::ssl::context::pem);
+    } catch (std::exception const& e) {
+      std::ostringstream error_stream;
+      error_stream << "Error setting up TLSv1.3 context: " << e.what();
+      BOOST_LOG_TRIVIAL(error) << error_stream.str();
+      throw std::runtime_error(error_stream.str());
+    }
+    start_accepting();
+  }
 
   /// @brief Destructor
-  ~TlsReceiveStrategy() override;
+  ~TlsReceiver() override {
+    try {
+      acceptor_.close();
+    } catch (std::exception const& e) {
+      BOOST_LOG_TRIVIAL(error) << "Exception in destructor: " << e.what();
+    }
+  }
 
  private:
-  void start_accepting();
+  void start_accepting() {
+    auto socket = std::make_shared<
+        boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(
+        acceptor_.get_executor(), ssl_ctx_);
+    acceptor_.async_accept(
+        socket->lowest_layer(),
+        [this, socket](boost::system::error_code err_code) {
+          if (!err_code) {
+            BOOST_LOG_TRIVIAL(info) << "Accepted secure connection from "
+                                    << socket->lowest_layer().remote_endpoint();
+            start_handshake(socket);
+          } else {
+            BOOST_LOG_TRIVIAL(error) << "Accept failed: " << err_code.message();
+          }
+          start_accepting();  // Keep listening for new connections
+        });
+  }
+
   void start_handshake(std::shared_ptr<boost::asio::ssl::stream<
-                           boost::asio::ip::tcp::socket>> const& socket);
+                           boost::asio::ip::tcp::socket>> const& socket) {
+    socket->async_handshake(
+        boost::asio::ssl::stream_base::server,
+        [this, socket](boost::system::error_code err_code) {
+          if (!err_code) {
+            BOOST_LOG_TRIVIAL(debug) << "TLSv1.3 handshake successful!";
+            start_receiving(socket);
+          } else {
+            BOOST_LOG_TRIVIAL(error)
+                << "TLSv1.3 handshake failed: " << err_code.message();
+          }
+        });
+  }
+
   void start_receiving(std::shared_ptr<boost::asio::ssl::stream<
-                           boost::asio::ip::tcp::socket>> const& socket);
+                           boost::asio::ip::tcp::socket>> const& socket) {
+    auto buffer = std::make_shared<std::string>(MessageT::max_blob_size, '\0');
+
+    boost::asio::async_read(
+        *socket, boost::asio::buffer(*buffer),
+        [this, buffer, socket](boost::system::error_code err_code,
+                               size_t bytes_recvd) {
+          if (err_code == boost::asio::error::eof && bytes_recvd > 0) {
+            BOOST_LOG_TRIVIAL(debug)
+                << "Received " << bytes_recvd << " bytes securely.";
+            buffer->resize(bytes_recvd);
+            this->on_read(MessageT(*buffer));
+            start_receiving(socket);
+          } else {
+            BOOST_LOG_TRIVIAL(error)
+                << "Error receiving data: " << err_code.message();
+          }
+        });
+  }
 
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::ssl::context ssl_ctx_;
-  size_t const max_blob_size_;
 };
 
 }  // namespace simpleio::transports::ip

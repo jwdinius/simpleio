@@ -1,5 +1,5 @@
 // Copyright (c) 2025, Joe Dinius, Ph.D.
-// SPDX-License-Identifier: Apache-2.0#pragma once
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <algorithm>
 #include <memory>
@@ -43,13 +43,13 @@ class Serializer {
   /// @param entity, the data structure to serialize.
   /// @return std::string, the serialized data structure.
   /// @throw SerializerError, if an error occurs during serialization.
-  virtual std::string serialize(T const& entity) = 0;
+  virtual std::string serialize(entity_t const& entity) = 0;
 
   /// @brief Deserialize a string into a data structure of type T.
   /// @param blob, the string to deserialize.
   /// @return T, the deserialized data structure.
   /// @throw SerializerError, if an error occurs during deserialization.
-  virtual T deserialize(std::string const& blob) = 0;
+  virtual entity_t deserialize(std::string const& blob) = 0;
 };
 
 /// @brief A message class encapsulating a data structure of type T and its
@@ -60,6 +60,10 @@ class Serializer {
 template <typename SerializerT>
 class Message {
  public:
+  using entity_t = typename SerializerT::entity_t;
+  using serializer_t = SerializerT;
+  static constexpr size_t max_blob_size = SerializerT::max_blob_size;
+
   /// @brief Default constructor deleted.
   Message() = delete;
 
@@ -67,40 +71,39 @@ class Message {
   ~Message() = default;
 
   /// @brief Construct from a SerializerT object and a data structure of type
-  /// SerializerT::entity_t.
+  /// entity_t.
   /// @param entity, the data structure to encapsulate.
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializerError, if an error occurs during serialization.
-  explicit Message(typename SerializerT::entity_t const& entity,
-                   std::shared_ptr<SerializerT> strategy)
+  explicit Message(entity_t const& entity,
+                   std::shared_ptr<serializer_t> strategy)
       : entity_(entity),
         strategy_(std::move(strategy)),
-        blob_(SerializerT::max_blob_size, '\0') {
+        blob_(serializer_t::max_blob_size, '\0') {
     blob_init();
   }
 
-  /// @brief Construct from a SerializerT::entity_t object.
+  /// @brief Construct from a entity_t object.
   /// @param entity, the data structure to encapsulate.
   /// @throw SerializerError, if an error occurs during serialization.
-  explicit Message(typename SerializerT::entity_t const& entity)
+  explicit Message(entity_t const& entity)
       : entity_(entity),
-        strategy_(std::make_shared<SerializerT>()),
-        blob_(SerializerT::max_blob_size, '\0') {
+        strategy_(std::make_shared<serializer_t>()),
+        blob_(serializer_t::max_blob_size, '\0') {
     blob_init();
   }
 
   /// @brief Construct from a SerializerT object and a moved data structure of
-  /// type SerializerT::entity_t.
+  /// type entity_t.
   /// @param entity, the data structure to encapsulate.
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializerError, if an error occurs during serialization.
-  explicit Message(typename SerializerT::entity_t&& entity,
-                   std::shared_ptr<SerializerT> strategy)
+  explicit Message(entity_t&& entity, std::shared_ptr<serializer_t> strategy)
       : entity_(std::move(entity)),
         strategy_(std::move(strategy)),
-        blob_(SerializerT::max_blob_size, '\0') {
+        blob_(serializer_t::max_blob_size, '\0') {
     auto _blob = strategy_->serialize(entity_);
-    if (_blob.size() > SerializerT::max_blob_size) {
+    if (_blob.size() > serializer_t::max_blob_size) {
       throw SerializerError("Blob size exceeds maximum size.");
     }
     blob_.resize(_blob.size());
@@ -108,13 +111,13 @@ class Message {
   }
 
   /// @brief Construct from a moved data structure of type
-  /// SerializerT::entity_t.
+  /// entity_t.
   /// @param entity, the data structure to encapsulate.
   /// @throw SerializerError, if an error occurs during serialization.
-  explicit Message(typename SerializerT::entity_t&& entity)
+  explicit Message(entity_t&& entity)
       : entity_(std::move(entity)),
-        strategy_(std::make_shared<SerializerT>()),
-        blob_(SerializerT::max_blob_size, '\0') {
+        strategy_(std::make_shared<serializer_t>()),
+        blob_(serializer_t::max_blob_size, '\0') {
     blob_init();
   }
 
@@ -122,13 +125,13 @@ class Message {
   /// @param blob, the serialized string.
   /// @param strategy, the serialization strategy to use.
   /// @throw SerializerError, if an error occurs during serialization.
-  /// @details This constructor is only compiled if SerializerT::entity_t is not
+  /// @details This constructor is only compiled if entity_t is not
   /// a string.
   template <typename U = SerializerT,
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
   explicit Message(std::string const& _blob,
-                   std::shared_ptr<SerializerT> strategy)
+                   std::shared_ptr<serializer_t> strategy)
       : strategy_(std::move(strategy)), blob_(_blob) {
     entity_init();
   }
@@ -142,7 +145,7 @@ class Message {
   template <typename U = SerializerT,
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
-  explicit Message(std::string&& _blob, std::shared_ptr<SerializerT> strategy)
+  explicit Message(std::string&& _blob, std::shared_ptr<serializer_t> strategy)
       : strategy_(std::move(strategy)), blob_(std::move(_blob)) {
     entity_init();
   }
@@ -156,7 +159,7 @@ class Message {
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
   explicit Message(std::string const& _blob)
-      : strategy_(std::make_shared<SerializerT>()), blob_(_blob) {
+      : strategy_(std::make_shared<serializer_t>()), blob_(_blob) {
     entity_init();
   }
 
@@ -169,13 +172,13 @@ class Message {
             typename = std::enable_if_t<
                 !std::is_same_v<typename U::entity_t, std::string>>>
   explicit Message(std::string&& _blob)
-      : strategy_(std::make_shared<SerializerT>()), blob_(std::move(_blob)) {
+      : strategy_(std::make_shared<serializer_t>()), blob_(std::move(_blob)) {
     entity_init();
   }
 
   /// @brief Return the data structure in native format.
   /// @return T, the native data type of the Message.
-  [[nodiscard]] typename SerializerT::entity_t entity() const {
+  [[nodiscard]] entity_t entity() const {
     return entity_;
   }
 
@@ -188,7 +191,7 @@ class Message {
 
   /// @brief Return the serialization strategy used by the Message.
   /// @return std::shared_ptr<SerializerT>, the serialization strategy.
-  [[nodiscard]] std::shared_ptr<SerializerT> serializer() const {
+  [[nodiscard]] std::shared_ptr<serializer_t> serializer() const {
     return strategy_;
   }
 
@@ -213,8 +216,8 @@ class Message {
     entity_ = strategy_->deserialize(blob_);
   }
 
-  std::shared_ptr<SerializerT> strategy_;
-  typename SerializerT::entity_t entity_;
+  std::shared_ptr<serializer_t> strategy_;
+  entity_t entity_;
   std::string blob_;
 };
 }  // namespace simpleio

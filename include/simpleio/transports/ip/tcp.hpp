@@ -71,8 +71,8 @@ class TcpSender : public Sender<MessageT> {
 /// @tparam MessageT, the type of message to receive.
 /// @tparam F, the type of callback function to execute when a message is
 ///          received.
-template <typename MessageT, typename F = std::function<void(MessageT const&)>>
-class TcpReceiver : public Receiver<MessageT, F> {
+template <typename MessageT>
+class TcpReceiver : public Receiver<MessageT> {
  public:
   /// @brief Construct from a shared io_context and a local endpoint
   /// @param io_ctx, the shared io_context.
@@ -84,10 +84,10 @@ class TcpReceiver : public Receiver<MessageT, F> {
   /// @param worker, the worker to use for processing messages.
   explicit TcpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                        boost::asio::ip::tcp::endpoint const& local_endpoint,
-                       F message_cb,
+                       typename Receiver<MessageT>::callback_t message_cb,
                        std::shared_ptr<simpleio::Worker> const& worker)
       : acceptor_(*io_ctx, local_endpoint),
-        Receiver<MessageT, F>(std::move(message_cb), worker) {
+        Receiver<MessageT>(std::move(message_cb), worker) {
     start_accepting();
   }
 

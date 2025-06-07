@@ -222,4 +222,14 @@ class Message {
   entity_t entity_;
   std::string blob_;
 };
+
+// NOLINTBEGIN [build/namespaces]
+template <typename RequestSerializer,
+          typename ResponseSerializer = RequestSerializer>
+// NOLINTEND [build/namespaces]
+class Service {
+ public:
+  using RequestT = Message<RequestSerializer>;
+  using ResponseT = Message<ResponseSerializer>;
+};
 }  // namespace simpleio

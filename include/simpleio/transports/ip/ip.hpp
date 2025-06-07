@@ -11,6 +11,8 @@
 #include <utility>
 
 #include "simpleio/transport.hpp"
+#include "simpleio/transports/ip/http.hpp"
+#include "simpleio/transports/ip/https.hpp"
 #include "simpleio/transports/ip/tcp.hpp"
 #include "simpleio/transports/ip/tls.hpp"
 #include "simpleio/transports/ip/udp.hpp"
@@ -19,7 +21,7 @@
 namespace simpleio::transports::ip {
 
 /// @brief Enumeration of transport schemes.
-enum class Scheme { TCP, TLS, UDP, UDP_BROADCAST, UDP_MULTICAST };
+enum class Scheme { HTTP, HTTPS, TCP, TLS, UDP, UDP_BROADCAST, UDP_MULTICAST };
 
 /// @brief IO worker.
 /// @details An IoWorker sets up a shared task scheduler, lifecycle manager,
@@ -67,6 +69,8 @@ struct SenderOptions {
   std::optional<uint8_t> hops;   // for UDP_MULTICAST, == 0 for default
   std::optional<bool> loopback;  // for UDP_MULTICAST, == true for loopback
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
+  std::optional<std::chrono::duration<int>>
+      timeout;  // Timeout for client requests
 };
 
 /// @brief Factory function to create a sender.
@@ -180,6 +184,8 @@ struct ReceiverOptions {
   uint16_t local_port;
   std::optional<TlsConfig> tls_config;
   std::optional<uint8_t> ipv6_interface;  // for UDP_MULTICAST, e.g., eth0 = 2
+  std::optional<std::chrono::duration<int>>
+      timeout;  // Timeout for handling client requests
 };
 
 /// @brief Factory function to create a receiver.
@@ -194,14 +200,13 @@ struct ReceiverOptions {
 /// @param options, the options for creating the receiver.
 /// @return A shared pointer to the created receiver.
 /// @tparam MessageT, the type of message to receive.
-/// @tparam F, the type of callback function to execute when a message is
-///         received.
 /// @throw TransportException, if an error occurs during receiver creation.
 // NOLINTBEGIN [build/namespaces]
-template <typename MessageT, typename F = std::function<void(MessageT const&)>>
+template <typename MessageT>
 std::shared_ptr<Receiver<MessageT>> make_receiver(
     std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
-    F message_cb, ReceiverOptions const& options) {
+    typename Receiver<MessageT>::callback_t message_cb,
+    ReceiverOptions const& options) {
   // NOLINTEND [build/namespaces]
   auto io_ctx = io_wrkr->scheduler();
   auto callback_handler = io_wrkr->executor();
@@ -302,4 +307,113 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
                                std::to_string(static_cast<int>(scheme)));
   }
 }
+
+/// @brief Factory function to create a client.
+/// @details This function creates a client based on the specified scheme,
+///         options, and message callback to execute when a message is received.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (HTTP, HTTPS, etc.).
+/// @param message_cb, the callback function to call when a message is
+///                    received. The function must not modify shared state
+///                    without protecting concurrent accesses and must not
+///                    throw exceptions.
+/// @param options, the options for creating the client.
+/// @return A shared pointer to the created client.
+/// @tparam ServiceT, the type of service to construct.
+/// @throw TransportException, if an error occurs during client creation.
+// NOLINTBEGIN [build/namespaces]
+template <typename ServiceT>
+std::shared_ptr<Client<ServiceT>> make_client(
+    std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
+    SenderOptions const& options) {
+  // NOLINTEND [build/namespaces]
+  auto io_ctx = io_wrkr->scheduler();
+  auto callback_handler = io_wrkr->executor();
+  if (!options.timeout) {
+    throw TransportException("Timeout is required for client requests");
+  }
+  switch (scheme) {
+    case Scheme::HTTP: {
+      return std::make_shared<HttpClient<ServiceT>>(
+          io_ctx,
+          boost::asio::ip::tcp::endpoint(
+              boost::asio::ip::address::from_string(options.remote_ip),
+              options.remote_port),
+          callback_handler, options.timeout.value());
+    }
+    case Scheme::HTTPS: {
+      if (!options.tls_config) {
+        throw TransportException("TLS config is required for HTTPS scheme");
+      }
+      return std::make_shared<HttpsClient<ServiceT>>(
+          io_ctx, options.tls_config.value(),
+          boost::asio::ip::tcp::endpoint(
+              boost::asio::ip::address::from_string(options.remote_ip),
+              options.remote_port),
+          callback_handler, options.timeout.value());
+    }
+    default:
+      throw TransportException("Control fell through for make_client" +
+                               std::to_string(static_cast<int>(scheme)));
+  }
+}
+
+/// @brief Factory function to create a server.
+/// @details This function creates a server based on the specified scheme,
+///         options, and request callback to execute when a request is received.
+/// @param io_wrkr, the shared IO worker to use for scheduling and execution.
+/// @param scheme, the transport scheme to use (HTTP, HTTPS, etc.).
+/// @param request_cb, the callback function to call when a request is
+///                    received. The function must not modify shared state
+///                    without protecting concurrent accesses and must not
+///                    throw exceptions.
+/// @param options, the options for creating the server.
+/// @return A shared pointer to the created server.
+/// @tparam ServiceT, the type of service to construct.
+/// @throw TransportException, if an error occurs during server creation.
+// NOLINTBEGIN [build/namespaces]
+template <typename ServiceT>
+std::shared_ptr<Server<ServiceT>> make_server(
+    std::shared_ptr<IoWorker> const& io_wrkr, Scheme const& scheme,
+    typename Server<ServiceT>::request_callback_t const& request_cb,
+    ReceiverOptions const& options) {
+  // NOLINTEND [build/namespaces]
+  if (!options.local_ip) {
+    throw TransportException("Local IP is required for all IP server schemes.");
+  }
+  if (!options.timeout) {
+    throw TransportException("Timeout is required for client requests");
+  }
+  auto io_ctx = io_wrkr->scheduler();
+  auto callback_handler = io_wrkr->executor();
+  switch (scheme) {
+    case Scheme::HTTP: {
+      auto server = std::make_shared<HttpServer<ServiceT>>(
+          io_ctx,
+          boost::asio::ip::tcp::endpoint(
+              boost::asio::ip::address::from_string(options.local_ip.value()),
+              options.local_port),
+          request_cb, callback_handler, options.timeout.value());
+      server->start();
+      return server;
+    }
+    case Scheme::HTTPS: {
+      if (!options.tls_config) {
+        throw TransportException("TLS config is required for HTTPS scheme");
+      }
+      auto server = std::make_shared<HttpsServer<ServiceT>>(
+          io_ctx, options.tls_config.value(),
+          boost::asio::ip::tcp::endpoint(
+              boost::asio::ip::address::from_string(options.local_ip.value()),
+              options.local_port),
+          request_cb, callback_handler, options.timeout.value());
+      server->start();
+      return server;
+    }
+    default:
+      throw TransportException("Control fell through for make_server" +
+                               std::to_string(static_cast<int>(scheme)));
+  }
+}
+
 }  // namespace simpleio::transports::ip

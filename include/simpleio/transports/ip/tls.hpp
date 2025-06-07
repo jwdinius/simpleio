@@ -132,10 +132,8 @@ class TlsSender : public Sender<MessageT> {
 ///          from a specified remote endpoint securely. Messages received are
 ///          processed by a callback function.
 /// @tparam MessageT, the type of message to receive.
-/// @tparam F, the type of callback function to execute when a message is
-///          received.
-template <typename MessageT, typename F = std::function<void(MessageT const&)>>
-class TlsReceiver : public Receiver<MessageT, F> {
+template <typename MessageT>
+class TlsReceiver : public Receiver<MessageT> {
  public:
   /// @brief Construct from a shared io_context, a TLS configuration, a local
   /// endpoint, and a callback function.
@@ -152,10 +150,11 @@ class TlsReceiver : public Receiver<MessageT, F> {
   TlsReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
               TlsConfig const& tls_config,
               boost::asio::ip::tcp::endpoint const& local_endpoint,
-              F message_cb, std::shared_ptr<simpleio::Worker> const& worker)
+              typename Receiver<MessageT>::callback_t message_cb,
+              std::shared_ptr<simpleio::Worker> const& worker)
       : acceptor_(*io_ctx, local_endpoint),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
-        Receiver<MessageT, F>(std::move(message_cb), worker) {
+        Receiver<MessageT>(std::move(message_cb), worker) {
     try {
       ssl_ctx_.load_verify_file(tls_config.ca_file.string());
       ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());

@@ -7,29 +7,17 @@ target_sources(base
       simpleio/transport.hpp
 )
 
-target_sources(worker
+target_sources(messages_http
   INTERFACE
     FILE_SET HEADERS
     FILES
-      simpleio/worker.hpp
+      simpleio/messages/http.hpp
 )
 
-target_link_libraries(worker
+target_link_libraries(messages_http
   INTERFACE
     base
-)
-
-target_sources(messages_xml
-  PUBLIC
-    FILE_SET HEADERS
-    FILES
-      simpleio/messages/xml.hpp
-)
-
-target_link_libraries(messages_xml
-  PUBLIC
-    base
-    Poco::XML
+    Boost::system
 )
 
 target_sources(messages_json
@@ -45,19 +33,46 @@ target_link_libraries(messages_json
     nlohmann_json::nlohmann_json
 )
 
+target_sources(messages_xml
+  PUBLIC
+    FILE_SET HEADERS
+    FILES
+      simpleio/messages/xml.hpp
+)
+
+target_link_libraries(messages_xml
+  PUBLIC
+    base
+    Poco::XML
+)
+
 target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
+      simpleio/transports/ip/http.hpp
+      simpleio/transports/ip/https.hpp
       simpleio/transports/ip/ip.hpp
       simpleio/transports/ip/tcp.hpp
       simpleio/transports/ip/tls.hpp
-#      simpleio/transports/ip/udp.hpp
+      simpleio/transports/ip/udp.hpp
 )
-#
+
 target_link_libraries(transports_ip
   PUBLIC
     base
     Boost::system
     OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
+)
+
+target_sources(worker
+  INTERFACE
+    FILE_SET HEADERS
+    FILES
+      simpleio/worker.hpp
+)
+
+target_link_libraries(worker
+  INTERFACE
+    base
 )

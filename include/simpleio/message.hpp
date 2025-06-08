@@ -223,6 +223,13 @@ class Message {
   std::string blob_;
 };
 
+/// @brief A service class that defines a request and response type for a
+/// service.
+/// @details A service is composed of a request and response type, which are
+/// both message types templated on a serializer.
+/// @tparam RequestSerializer, the serializer type for the request message.
+/// @tparam ResponseSerializer, the serializer type for the response message,
+/// defaulting to the same type as RequestSerializer.
 // NOLINTBEGIN [build/namespaces]
 template <typename RequestSerializer,
           typename ResponseSerializer = RequestSerializer>

@@ -17,17 +17,31 @@
 
 namespace simpleio::transports::ip {
 
-// Report a failure
+/// @brief Logs an error message with the provided error code and description.
+/// @details This function is shared between HTTP and HTTPS clients and servers.
+/// @param err_code, the error code to log.
+/// @param what, a description of the error to log.
 inline void fail(boost::beast::error_code err_code, char const* what) {
   BOOST_LOG_TRIVIAL(error) << what << ": " << err_code.message();
 }
 
+/// @brief HTTP client for sending requests and receiving responses
+/// asynchronously.
+/// @details This class uses Boost Beast to send HTTP requests and receive
+///          HTTP responses of a templated service type. This class is inspired
+///          by the Boost Beast Github example for async HTTP clients.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
                    public Client<ServiceT> {
  public:
-  // Objects are constructed with a strand to
-  // ensure that handlers do not execute concurrently.
+  /// @brief Constructor that initializes the HTTP client with a shared
+  /// io_context,
+  ///          a remote endpoint, a worker, and a timeout duration.
+  /// @param ioc, the shared io_context to use for asynchronous operations.
+  /// @param remote_endpoint, the remote endpoint to connect to.
+  /// @param worker, the shared worker.
+  /// @param timeout, the timeout duration for operations.
   explicit HttpClient(std::shared_ptr<boost::asio::io_context> const& ioc,
                       boost::asio::ip::tcp::endpoint remote_endpoint,
                       std::shared_ptr<simpleio::Worker> const& worker,
@@ -38,6 +52,15 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
         timeout_(timeout),
         Client<ServiceT>(worker) {}
 
+  /// @brief Asynchronously sends a request and returns a future for the
+  /// response.
+  /// @details This function sends an HTTP request and returns a future that
+  /// will
+  ///          hold the response once it is received. The request is sent using
+  ///          Boost Beast's asynchronous operations.
+  /// @param req, the request to send, which is of type ServiceT::RequestT.
+  /// @return std::future<typename ServiceT::ResponseT>, a future that will hold
+  ///          the response once it is received.
   std::future<typename ServiceT::ResponseT> send_request_async(
       typename ServiceT::RequestT const& req) override {
     req_ = req.entity();
@@ -46,6 +69,9 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
     return promise_->get_future();
   }
 
+  /// @brief Synchronously sends a request and returns a response.
+  /// @param req, the request to send, which is of type ServiceT::RequestT.
+  /// @return typename ServiceT::ResponseT, the response.
   typename ServiceT::ResponseT send_request(
       typename ServiceT::RequestT const& req) override {
     auto future = send_request_async(req);
@@ -58,6 +84,8 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
   }
 
  private:
+  /// @brief Connects to the remote endpoint and starts the asynchronous
+  /// request.
   void connect() {
     BOOST_LOG_TRIVIAL(debug) << "HttpClient connecting.";
 
@@ -68,6 +96,8 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
                                          this->shared_from_this()));
   }
 
+  /// @brief Writes the request to the remote endpoint after a successful
+  /// connection.
   void write_request(boost::beast::error_code err_code) {
     if (err_code) {
       return fail(err_code, "Connection failed.");
@@ -84,6 +114,7 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
                                          this->shared_from_this()));
   }
 
+  /// @brief Awaits the response after sending the request.
   void await_response(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -99,6 +130,10 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
                                          this->shared_from_this()));
   }
 
+  /// @brief Handles the response received from the remote endpoint after it has
+  /// been read.
+  /// @details This function will close the connection gracefully after handling
+  /// the response.
   void handle_response(boost::beast::error_code err_code,
                        std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -133,10 +168,23 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
   typename ServiceT::ResponseT::entity_t res_;
 };
 
+/// @brief  HTTP server session for handling incoming requests and sending
+/// responses.
+/// @details Each request is handled in its own session, allowing for concurrent
+///          processing of multiple requests. This class is inspired by the
+///          Boost Beast Github example for async HTTP servers.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpServerSession
     : public std::enable_shared_from_this<HttpServerSession<ServiceT>> {
  public:
+  /// @brief Constructor that initializes the asynchronous HTTP server session
+  /// with a request
+  ///          callback, a worker, a timeout duration, and a socket.
+  /// @param request_cb, the callback function to handle incoming requests.
+  /// @param worker, the shared worker to process requests.
+  /// @param timeout, the timeout duration for operations.
+  /// @param socket, the socket to use for the session.
   explicit HttpServerSession(
       typename Server<ServiceT>::request_callback_t request_cb,
       std::shared_ptr<Worker> worker, std::chrono::duration<int> timeout,
@@ -146,6 +194,7 @@ class HttpServerSession
         timeout_(timeout),
         stream_(std::move(socket)) {}
 
+  /// @brief Starts the session by awaiting the request.
   void run() {
     boost::asio::dispatch(stream_.get_executor(),
                           boost::beast::bind_front_handler(
@@ -154,6 +203,8 @@ class HttpServerSession
   }
 
  private:
+  /// @brief Awaits an incoming request from the client after session is
+  /// started.
   void await_request() {
     BOOST_LOG_TRIVIAL(debug) << "HttpServerSession running, awaiting request.";
     req_ = {};
@@ -165,6 +216,7 @@ class HttpServerSession
             this->shared_from_this()));
   }
 
+  /// @brief Handles the incoming request after it has been read.
   void handle_request(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -193,6 +245,7 @@ class HttpServerSession
     });
   }
 
+  /// @brief Teardown the session after the response has been sent.
   void teardown(bool _close, boost::beast::error_code err_code,
                 std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -209,6 +262,7 @@ class HttpServerSession
     await_request();
   }
 
+  /// @brief Closes the session gracefully after handling the request.
   void close() {
     BOOST_LOG_TRIVIAL(debug) << "HttpServerSession closing connection.";
     boost::beast::error_code err_code;
@@ -225,10 +279,26 @@ class HttpServerSession
   typename ServiceT::ResponseT::entity_t res_;
 };
 
+/// @brief HttpServer class for accepting incoming HTTP connections and handling
+/// requests.
+/// @details This class uses Boost Beast to accept incoming HTTP connections and
+///          handle requests using a templated service type. It is designed to
+///          run asynchronously and can handle multiple connections
+///          concurrently.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
                    public Server<ServiceT> {
  public:
+  /// @brief Constructor that initializes the HTTP server with a shared
+  /// io_context,
+  ///          a local endpoint, a request callback, a worker, and a timeout
+  ///          duration.
+  /// @param ioc, the shared io_context to use for asynchronous operations.
+  /// @param local_endpoint, the local endpoint to bind the server to.
+  /// @param request_cb, the callback function to handle incoming requests.
+  /// @param worker, the shared worker to process requests.
+  /// @param timeout, the timeout duration for operations.
   HttpServer(
       std::shared_ptr<boost::asio::io_context> ioc,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
@@ -265,6 +335,10 @@ class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
     }
   }
 
+  /// @brief Destructor that closes the acceptor and logs the shutdown.
+  /// @details This destructor ensures that the acceptor is closed gracefully
+  ///          when the HttpServer object is destroyed, preventing any further
+  ///          incoming connections.
   ~HttpServer() {
     BOOST_LOG_TRIVIAL(debug) << "HttpServer shutting down.";
     boost::beast::error_code err_code;
@@ -275,12 +349,14 @@ class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
     }
   }
 
+  /// @brief Starts the HTTP server and begins accepting incoming connections.
   void start() {
     BOOST_LOG_TRIVIAL(debug) << "HttpServer starting.";
     start_accepting();
   }
 
  private:
+  /// @brief Starts accepting incoming connections asynchronously.
   void start_accepting() {
     BOOST_LOG_TRIVIAL(debug)
         << "HttpServer started, start accepting connections.";
@@ -289,6 +365,8 @@ class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
                                                 this->shared_from_this()));
   }
 
+  /// @brief Accepts an incoming connection and starts a new session to handle
+  /// it.
   void accept(boost::beast::error_code err_code,
               boost::asio::ip::tcp::socket socket) {
     if (err_code) {

@@ -21,12 +21,25 @@
 
 namespace simpleio::transports::ip {
 
+/// @brief HTTPS client for sending requests and receiving responses
+/// asynchronously.
+/// @details This class uses Boost Beast to securely send HTTP requests and
+/// receive
+///          HTTP responses of a templated service type using TLS v1.3.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
                     public Client<ServiceT> {
  public:
-  // Objects are constructed with a strand to
-  // ensure that handlers do not execute concurrently.
+  /// @brief Constructor that initializes the HTTPS client with a shared
+  /// io_context,
+  ///          a TLS configuration, a remote endpoint, a worker, and a timeout
+  ///          duration.
+  /// @param ioc, the shared io_context to use for asynchronous operations.
+  /// @param tls_config, the TLS configuration to use for secure connections.
+  /// @param remote_endpoint, the remote endpoint to connect to.
+  /// @param worker, the shared worker.
+  /// @param timeout, the timeout duration for operations.
   explicit HttpsClient(std::shared_ptr<boost::asio::io_context> const& ioc,
                        TlsConfig const& tls_config,
                        boost::asio::ip::tcp::endpoint remote_endpoint,
@@ -51,6 +64,15 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
     }
   }
 
+  /// @brief Asynchronously sends a secure request and returns a future for the
+  /// response.
+  /// @details This function securely sends an HTTP request and returns a future
+  /// that will
+  ///          hold the response once it is received. The request is sent using
+  ///          Boost Beast's asynchronous operations.
+  /// @param req, the request to send, which is of type ServiceT::RequestT.
+  /// @return std::future<typename ServiceT::ResponseT>, a future that will hold
+  ///          the response once it is received.
   std::future<typename ServiceT::ResponseT> send_request_async(
       typename ServiceT::RequestT const& req) override {
     req_ = req.entity();
@@ -59,6 +81,9 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
     return promise_->get_future();
   }
 
+  /// @brief Synchronously sends a secure request and returns a response.
+  /// @param req, the request to send, which is of type ServiceT::RequestT.
+  /// @return typename ServiceT::ResponseT, the response.
   typename ServiceT::ResponseT send_request(
       typename ServiceT::RequestT const& req) override {
     auto future = send_request_async(req);
@@ -71,6 +96,7 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
   }
 
  private:
+  /// @brief Connects to the remote endpoint.
   void connect() {
     BOOST_LOG_TRIVIAL(debug) << "HttpsClient connecting.";
     // Reset the stream
@@ -83,6 +109,7 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
             &HttpsClient<ServiceT>::start_handshake, this->shared_from_this()));
   }
 
+  /// @brief Starts the TLS handshake after a successful connection.
   void start_handshake(boost::beast::error_code err_code) {
     if (err_code) {
       return fail(err_code, "Connection failed.");
@@ -99,6 +126,9 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
         boost::beast::bind_front_handler(&HttpsClient<ServiceT>::write_request,
                                          this->shared_from_this()));
   }
+
+  /// @brief Writes the request to the remote endpoint after a successful
+  /// handshake.
   void write_request(boost::beast::error_code err_code) {
     if (err_code) {
       return fail(err_code, "Connection failed.");
@@ -116,6 +146,7 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
                                          this->shared_from_this()));
   }
 
+  /// @brief Awaits the response after sending the request.
   void await_response(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -131,6 +162,10 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
             &HttpsClient<ServiceT>::handle_response, this->shared_from_this()));
   }
 
+  /// @brief Handles the response received from the remote endpoint after it has
+  /// been read.
+  /// @details This function will close the connection gracefully after handling
+  /// the response.
   void handle_response(boost::beast::error_code err_code,
                        std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -164,10 +199,28 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
   typename ServiceT::ResponseT::entity_t res_;
 };
 
+/// @brief  HTTP server session for handling incoming requests and sending
+/// responses
+///         securely.
+/// @details Each request is handled securely in its own session, allowing for
+/// concurrent
+///          processing of multiple requests. This class is inspired by the
+///          Boost Beast Github example for async HTTP servers.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpsServerSession
     : public std::enable_shared_from_this<HttpsServerSession<ServiceT>> {
  public:
+  /// @brief Constructor that initializes the asynchronous HTTP server session
+  /// with a request
+  ///          callback, a worker, a timeout duration, a TCP socket, and an SSL
+  ///          context.
+  /// @param request_cb, the callback function to handle incoming requests.
+  /// @param worker, the shared worker to process requests.
+  /// @param timeout, the timeout duration for operations.
+  /// @param socket, the socket to use for the session.
+  /// @param ssl_ctx, the shared pointer to the SSL context for secure
+  /// connections.
   explicit HttpsServerSession(
       typename Server<ServiceT>::request_callback_t request_cb,
       std::shared_ptr<Worker> worker, std::chrono::duration<int> timeout,
@@ -178,6 +231,7 @@ class HttpsServerSession
         timeout_(timeout),
         stream_(std::move(socket), *ssl_ctx) {}
 
+  /// @brief Starts the session by initiating the TLS handshake.
   void run() {
     stream_.async_handshake(boost::asio::ssl::stream_base::server,
                             boost::beast::bind_front_handler(
@@ -186,6 +240,7 @@ class HttpsServerSession
   }
 
  private:
+  /// @brief Awaits an incoming request from the client the TLS handshake.
   void await_request(boost::beast::error_code err_code) {
     if (err_code) {
       return fail(err_code, "handshake");
@@ -200,6 +255,7 @@ class HttpsServerSession
             this->shared_from_this()));
   }
 
+  /// @brief Handles the incoming request after it has been read.
   void handle_request(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -228,6 +284,7 @@ class HttpsServerSession
     });
   }
 
+  /// @brief Teardown the session after the response has been sent.
   void teardown(bool _close, boost::beast::error_code err_code,
                 std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
@@ -244,6 +301,7 @@ class HttpsServerSession
     await_request(err_code);
   }
 
+  /// @brief Closes the session gracefully after handling the request.
   void close() {
     auto self = this->shared_from_this();
     stream_.async_shutdown([self](boost::beast::error_code err_code) mutable {
@@ -264,10 +322,28 @@ class HttpsServerSession
   typename ServiceT::ResponseT::entity_t res_;
 };
 
+/// @brief HttpsServer class for accepting incoming HTTP connections and
+/// handling requests
+///        securely.
+/// @details This class uses Boost Beast to accept incoming HTTP connections and
+///          handle requests using a templated service type. It is designed to
+///          run asynchronously and can handle multiple connections
+///          concurrently.
+/// @tparam ServiceT, the service type
 template <typename ServiceT>
 class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
                     public Server<ServiceT> {
  public:
+  /// @brief Constructor that initializes the HTTPS server with a shared
+  /// io_context,
+  ///        a TLS configuration, a local endpoint, a request callback, a
+  ///        worker, and a timeout duration.
+  /// @param ioc, the shared io_context to use for asynchronous operations.
+  /// @param tls_config, the TLS configuration to use for secure connections.
+  /// @param local_endpoint, the local endpoint to bind the server to.
+  /// @param request_cb, the callback function to handle incoming requests.
+  /// @param worker, the shared worker to process requests.
+  /// @param timeout, the timeout duration for operations.
   HttpsServer(
       std::shared_ptr<boost::asio::io_context> ioc, TlsConfig const& tls_config,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
@@ -318,6 +394,10 @@ class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
     }
   }
 
+  /// @brief Destructor that closes the acceptor and logs the shutdown.
+  /// @details This destructor ensures that the acceptor is closed gracefully
+  ///          when the HttpsServer object is destroyed, preventing any further
+  ///          incoming connections.
   ~HttpsServer() {
     BOOST_LOG_TRIVIAL(debug) << "HttpsServer shutting down.";
     boost::beast::error_code err_code;
@@ -328,12 +408,14 @@ class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
     }
   }
 
+  /// @brief Starts the HTTPS server and begins accepting incoming connections.
   void start() {
     BOOST_LOG_TRIVIAL(debug) << "HttpsServer starting.";
     start_accepting();
   }
 
  private:
+  /// @brief Starts accepting incoming connections asynchronously.
   void start_accepting() {
     BOOST_LOG_TRIVIAL(debug)
         << "HttpsServer started, start accepting connections.";
@@ -342,6 +424,7 @@ class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
                                                 this->shared_from_this()));
   }
 
+  /// @brief Start the HTTPS Server session after connecting the socket.
   void accept(boost::beast::error_code err_code,
               boost::asio::ip::tcp::socket socket) {
     if (err_code) {

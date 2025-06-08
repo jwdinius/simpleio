@@ -21,27 +21,27 @@ target_link_libraries(messages_http
 )
 
 target_sources(messages_json
-  PUBLIC
+  INTERFACE
     FILE_SET HEADERS
     FILES
       simpleio/messages/json.hpp
 )
 
 target_link_libraries(messages_json
-  PUBLIC
+  INTERFACE
     base
     nlohmann_json::nlohmann_json
 )
 
 target_sources(messages_xml
-  PUBLIC
+  INTERFACE
     FILE_SET HEADERS
     FILES
       simpleio/messages/xml.hpp
 )
 
 target_link_libraries(messages_xml
-  PUBLIC
+  INTERFACE
     base
     Poco::XML
 )

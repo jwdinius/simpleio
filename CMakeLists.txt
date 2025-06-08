@@ -14,20 +14,23 @@ find_package(OpenSSL 3 REQUIRED)
 add_library(base INTERFACE)
 add_library(${PROJECT_NAME}::base ALIAS base)
 
-# Worker class
-add_library(worker INTERFACE)
-add_library(${PROJECT_NAME}::worker ALIAS worker)
-
 # Message classes
-add_library(messages_xml SHARED)
-add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
+add_library(messages_http INTERFACE)
+add_library(${PROJECT_NAME}::messages::http ALIAS messages_http)
 
-add_library(messages_json SHARED)
+add_library(messages_json INTERFACE)
 add_library(${PROJECT_NAME}::messages::json ALIAS messages_json)
+
+add_library(messages_xml INTERFACE)
+add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
 
 # Transport classes
 add_library(transports_ip SHARED)
 add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
+
+# Worker class
+add_library(worker INTERFACE)
+add_library(${PROJECT_NAME}::worker ALIAS worker)
 
 add_subdirectory(include)
 add_subdirectory(src)
@@ -46,8 +49,9 @@ install(
 install(
   TARGETS
     base
-    messages_xml
+    messages_http
     messages_json
+    messages_xml
     transports_ip
     worker
   EXPORT ${PROJECT_NAME}Targets

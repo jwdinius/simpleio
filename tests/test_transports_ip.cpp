@@ -18,11 +18,13 @@
 #include <utility>
 
 #include "certs_path.h"  // NOLINT [build/include_subdir]
+#include "simpleio/messages/http.hpp"
 #include "simpleio/transports/ip/ip.hpp"
 
 namespace asio = boost::asio;
 namespace blog = boost::log;
 namespace sio = simpleio;
+namespace siomsg = simpleio::messages;
 namespace siotrns = simpleio::transports;
 
 void init_logger() {
@@ -61,9 +63,9 @@ class SimpleString : public sio::Message<SimpleStringSerializer> {
       : sio::Message<SimpleStringSerializer>(blob) {}
 };
 
-class TestNetworkTransport : public ::testing::Test {
+class TestNetworkTransportSendReceive : public ::testing::Test {
  public:
-  TestNetworkTransport() : message_() {
+  TestNetworkTransportSendReceive() : message_() {
     BOOST_LOG_TRIVIAL(debug) << "TestNetworkTransport constructor";
 
     /// @brief Callback function to handle received messages.
@@ -100,6 +102,8 @@ class TestNetworkTransport : public ::testing::Test {
   }
 
   void TearDown() override {
+    io_worker_->scheduler().reset();
+    io_worker_->executor().reset();
     io_worker_.reset();
   }
 
@@ -114,7 +118,7 @@ class TestNetworkTransport : public ::testing::Test {
 };
 
 /// @brief Test for Scheme::TCP with an IPv4 address
-TEST_F(TestNetworkTransport, TestTcpIPv4) {
+TEST_F(TestNetworkTransportSendReceive, TestTcpIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
@@ -128,7 +132,7 @@ TEST_F(TestNetworkTransport, TestTcpIPv4) {
 }
 
 /// @brief Test for Scheme::TCP with an IPv6 address
-TEST_F(TestNetworkTransport, TestTcpIPv6) {
+TEST_F(TestNetworkTransportSendReceive, TestTcpIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
@@ -142,7 +146,7 @@ TEST_F(TestNetworkTransport, TestTcpIPv6) {
 }
 
 /// @brief Test for Scheme::TLS with an IPv4 address
-TEST_F(TestNetworkTransport, TestTlsIPv4) {
+TEST_F(TestNetworkTransportSendReceive, TestTlsIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV4_ADDR,
       .local_port = TEST_PORT_NUM,
@@ -168,7 +172,7 @@ TEST_F(TestNetworkTransport, TestTlsIPv4) {
 }
 
 /// @brief Test for Scheme::TLS with an IPv6 address
-TEST_F(TestNetworkTransport, TestTlsIPv6) {
+TEST_F(TestNetworkTransportSendReceive, TestTlsIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV6_ADDR,
       .local_port = TEST_PORT_NUM,
@@ -194,7 +198,7 @@ TEST_F(TestNetworkTransport, TestTlsIPv6) {
 }
 
 /// @brief Test for Scheme::UDP with an IPv4 address
-TEST_F(TestNetworkTransport, TestUdpIPv4) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
@@ -208,7 +212,7 @@ TEST_F(TestNetworkTransport, TestUdpIPv4) {
 }
 
 /// @brief Test for Scheme::UDP with an IPv6 address
-TEST_F(TestNetworkTransport, TestUdpIPv6) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
                                                 .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
@@ -222,7 +226,7 @@ TEST_F(TestNetworkTransport, TestUdpIPv6) {
 }
 
 /// @brief Test for Scheme::UDP_BROADCAST with an IPv4 address
-TEST_F(TestNetworkTransport, TestUdpBroadcastIPv4) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
       io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, message_cb_, rcvr_opts);
@@ -236,7 +240,7 @@ TEST_F(TestNetworkTransport, TestUdpBroadcastIPv4) {
 
 /// @brief Test for Scheme::UDP_BROADCAST with an IPv6 address
 /// @details This should fail because IPv6 does not support broadcast.
-TEST_F(TestNetworkTransport, TestUdpBroadcastIPv6) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv6) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{.local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
       io_worker_, siotrns::ip::Scheme::UDP_BROADCAST, message_cb_, rcvr_opts);
@@ -248,7 +252,7 @@ TEST_F(TestNetworkTransport, TestUdpBroadcastIPv6) {
 }
 
 /// @brief Test for Scheme::UDP_MULTICAST with an IPv4 address
-TEST_F(TestNetworkTransport, TestUdpMulticastIPv4) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpMulticastIPv4) {
   auto rcvr_opts = siotrns::ip::ReceiverOptions{
       .local_ip = TEST_IPV4_MULTICAST_ADDR, .local_port = TEST_PORT_NUM};
   auto rcvr = siotrns::ip::make_receiver<SimpleString>(
@@ -265,7 +269,7 @@ TEST_F(TestNetworkTransport, TestUdpMulticastIPv4) {
 }
 
 /// @brief Test for Scheme::UDP_MULTICAST with an IPv6 address
-TEST_F(TestNetworkTransport, TestUdpMulticastIPv6) {
+TEST_F(TestNetworkTransportSendReceive, TestUdpMulticastIPv6) {
   if (std::getenv("GITHUB_ACTIONS") != nullptr) {
     GTEST_SKIP() << "Skipping IPv6 multicast test on GitHub Actions";
   }
@@ -282,6 +286,179 @@ TEST_F(TestNetworkTransport, TestUdpMulticastIPv6) {
       io_worker_, siotrns::ip::Scheme::UDP_MULTICAST, sndr_opts);
 
   test_fn_(sndr);
+}
+
+using RequestT = siomsg::HttpRequestType<boost::beast::http::empty_body>;
+using ResponseT = siomsg::HttpResponseType<boost::beast::http::string_body>;
+using ReqSerializerT = siomsg::HttpRequestSerializer<RequestT>;
+using ResSerializerT = siomsg::HttpResponseSerializer<ResponseT>;
+using ServiceT = sio::Service<ReqSerializerT, ResSerializerT>;
+
+class TestNetworkTransportRequestRespond : public ::testing::Test {
+ public:
+  TestNetworkTransportRequestRespond() {
+    BOOST_LOG_TRIVIAL(debug) << "TestNetworkTransportClientServer constructor";
+
+    /// @brief Test function to send messages.
+    /// @details Send the message MAX_ITERS times and wait for message_cb_
+    ///          to be called MAX_ITERS times.
+    test_fn_ = [this](std::shared_ptr<sio::Client<ServiceT>> client) {
+      for (int i = 0; i < MAX_ITERS; i++) {
+        auto response = client->send_request(*request_);
+        EXPECT_EQ(response.entity().result(), boost::beast::http::status::ok);
+        EXPECT_EQ(response.entity().body(), "Hello, World!");
+        while (io_worker_->scheduler()->poll() > 0) {
+          // Keep polling until no more handlers are ready
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+      }
+      {
+        std::unique_lock lock(mutex_);
+        EXPECT_TRUE(cv_.wait_for(lock, std::chrono::milliseconds(500),
+                                 [this] { return num_calls_ == MAX_ITERS; }));
+      }
+    };
+
+    /// @brief Callback function to handle received messages.
+    /// @details Check that the received message matches the expected
+    ///          message and increment the call count.
+    request_cb_ = [this](typename ServiceT::RequestT const& request) ->
+        typename ServiceT::ResponseT {
+          std::lock_guard lock(mutex_);
+          EXPECT_EQ(request.entity().method(), boost::beast::http::verb::get);
+          EXPECT_EQ(request.entity().target(), "/");
+          auto response_entity = ResponseT();
+          response_entity.result(boost::beast::http::status::ok);
+          response_entity.version(11);
+          response_entity.set(boost::beast::http::field::content_type,
+                              "text/plain");
+          response_entity.set(boost::beast::http::field::server,
+                              BOOST_BEAST_VERSION_STRING);
+          response_entity.body() = "Hello, World!";
+          response_entity.prepare_payload();
+          if (++num_calls_ == MAX_ITERS) {
+            cv_.notify_one();
+          }
+          return typename ServiceT::ResponseT(std::move(response_entity));
+        };
+  }
+
+  /// @brief Create a request.
+  void create_request(sio::transports::ip::ReceiverOptions const& srvr_opts) {
+    auto req_entity = RequestT();
+    req_entity.target("/");
+    req_entity.version(11);
+    req_entity.method(boost::beast::http::verb::get);
+    req_entity.set(boost::beast::http::field::host,
+                   srvr_opts.local_ip.value() + ":" +
+                       std::to_string(srvr_opts.local_port));
+    req_entity.set(boost::beast::http::field::user_agent,
+                   BOOST_BEAST_VERSION_STRING);
+    request_ =
+        std::make_shared<typename ServiceT::RequestT>(std::move(req_entity));
+  }
+
+  void SetUp() override {
+    io_worker_ = std::make_shared<siotrns::ip::IoWorker>();
+    num_calls_ = 0;
+  }
+
+  void TearDown() override {
+    io_worker_->scheduler().reset();
+    io_worker_->executor().reset();
+    io_worker_.reset();
+  }
+
+ protected:
+  std::shared_ptr<typename ServiceT::RequestT> request_;
+  size_t num_calls_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  typename sio::Server<ServiceT>::request_callback_t request_cb_;
+  std::shared_ptr<siotrns::ip::IoWorker> io_worker_;
+  std::function<void(std::shared_ptr<sio::Client<ServiceT>>)> test_fn_;
+};
+
+/// @brief Test for Scheme::HTTP with an IPv4 address
+TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv4) {
+  auto srvr_opts =
+      siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV4_ADDR,
+                                   .local_port = TEST_PORT_NUM,
+                                   .timeout = std::chrono::seconds(1)};
+  auto server = siotrns::ip::make_server<ServiceT>(
+      io_worker_, siotrns::ip::Scheme::HTTP, request_cb_, srvr_opts);
+  EXPECT_NE(server, nullptr);
+
+  auto client_opts =
+      siotrns::ip::SenderOptions{.remote_ip = TEST_IPV4_ADDR,
+                                 .remote_port = TEST_PORT_NUM,
+                                 .timeout = std::chrono::seconds(1)};
+  auto client = sio::transports::ip::make_client<ServiceT>(
+      io_worker_, sio::transports::ip::Scheme::HTTP, client_opts);
+  EXPECT_NE(client, nullptr);
+
+  create_request(srvr_opts);
+  test_fn_(client);
+  client.reset();  // Ensure client is reset after test
+  server.reset();  // Ensure server is reset after test
+}
+
+/// @brief Test for Scheme::HTTP with an IPv6 address
+TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv6) {
+  auto srvr_opts =
+      siotrns::ip::ReceiverOptions{.local_ip = TEST_IPV6_ADDR,
+                                   .local_port = TEST_PORT_NUM,
+                                   .timeout = std::chrono::seconds(1)};
+  auto server = siotrns::ip::make_server<ServiceT>(
+      io_worker_, siotrns::ip::Scheme::HTTP, request_cb_, srvr_opts);
+  EXPECT_NE(server, nullptr);
+
+  auto client_opts =
+      siotrns::ip::SenderOptions{.remote_ip = TEST_IPV6_ADDR,
+                                 .remote_port = TEST_PORT_NUM,
+                                 .timeout = std::chrono::seconds(1)};
+  auto client = sio::transports::ip::make_client<ServiceT>(
+      io_worker_, sio::transports::ip::Scheme::HTTP, client_opts);
+  EXPECT_NE(client, nullptr);
+
+  create_request(srvr_opts);
+  test_fn_(client);
+  client.reset();  // Ensure client is reset after test
+  server.reset();  // Ensure server is reset after test
+}
+
+/// @brief Test for Scheme::HTTPS with an IPv4 address
+TEST_F(TestNetworkTransportRequestRespond, TestHttpsIPv4) {
+  auto srvr_opts = siotrns::ip::ReceiverOptions{
+      .local_ip = TEST_IPV4_ADDR,
+      .local_port = TEST_PORT_NUM + 1,
+      .tls_config =
+          siotrns::ip::TlsConfig{
+              .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+              .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
+              .key_file =
+                  std::filesystem::path(CERTS_PATH) / "private/receiver.key"},
+      .timeout = std::chrono::seconds(1)};
+  auto server = siotrns::ip::make_server<ServiceT>(
+      io_worker_, siotrns::ip::Scheme::HTTPS, request_cb_, srvr_opts);
+  EXPECT_NE(server, nullptr);
+
+  auto client_opts = siotrns::ip::SenderOptions{
+      .remote_ip = TEST_IPV4_ADDR,
+      .remote_port = TEST_PORT_NUM + 1,
+      .tls_config =
+          siotrns::ip::TlsConfig{
+              .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
+              .cert_file = std::filesystem::path(CERTS_PATH) / "sender.crt",
+              .key_file =
+                  std::filesystem::path(CERTS_PATH) / "private/sender.key"},
+      .timeout = std::chrono::seconds(1)};
+  auto client = sio::transports::ip::make_client<ServiceT>(
+      io_worker_, sio::transports::ip::Scheme::HTTPS, client_opts);
+  EXPECT_NE(client, nullptr);
+
+  create_request(srvr_opts);
+  test_fn_(client);
 }
 
 // NOLINTBEGIN [bugprone-exception-escape]

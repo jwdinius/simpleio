@@ -64,9 +64,8 @@ class Worker {
   /// @return a future that will hold the result of the
   ///         function execution.
   template <typename F, typename... Args>
-  std::future<typename std::result_of<F(Args...)>::type> push(F&& func,
-                                                              Args&&... args) {
-    using return_type = typename std::result_of<F(Args...)>::type;
+  std::future<std::invoke_result_t<F, Args...>> push(F&& func, Args&&... args) {
+    using return_type = std::invoke_result_t<F, Args...>;
 
     auto task = std::make_shared<std::packaged_task<return_type()>>(
         std::bind(std::forward<F>(func), std::forward<Args>(args)...));

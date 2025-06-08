@@ -81,8 +81,8 @@ class UdpSender : public Sender<MessageT> {
 /// @tparam MessageT, the type of message to receive.
 /// @tparam F, the type of callback function to execute when a message is
 ///          received.
-template <typename MessageT, typename F = std::function<void(MessageT const&)>>
-class UdpReceiver : public Receiver<MessageT, F> {
+template <typename MessageT>
+class UdpReceiver : public Receiver<MessageT> {
  public:
   /// @brief Construct from a shared io_context and a local endpoint
   /// @param io_ctx, the shared io_context.
@@ -94,9 +94,9 @@ class UdpReceiver : public Receiver<MessageT, F> {
   /// @param worker, the worker to use for processing messages.
   explicit UdpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                        boost::asio::ip::udp::endpoint const& local_endpoint,
-                       F message_cb,
+                       typename Receiver<MessageT>::callback_t message_cb,
                        std::shared_ptr<simpleio::Worker> const& worker)
-      : Receiver<MessageT, F>(std::move(message_cb), worker) {
+      : Receiver<MessageT>(std::move(message_cb), worker) {
     socket_ =
         std::make_unique<boost::asio::ip::udp::socket>(*io_ctx, local_endpoint);
     BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
@@ -112,10 +112,10 @@ class UdpReceiver : public Receiver<MessageT, F> {
   ///                    throw exceptions.
   /// @param worker, the worker to use for processing messages.
   explicit UdpReceiver(std::unique_ptr<boost::asio::ip::udp::socket> socket,
-                       F message_cb,
+                       typename Receiver<MessageT>::callback_t message_cb,
                        std::shared_ptr<simpleio::Worker> const& worker)
       : socket_(std::move(socket)),
-        Receiver<MessageT, F>(std::move(message_cb), worker) {
+        Receiver<MessageT>(std::move(message_cb), worker) {
     BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
     start_receiving();
   }

@@ -37,20 +37,18 @@ class HttpClient : public std::enable_shared_from_this<HttpClient<ServiceT>>,
  public:
   /// @brief Constructor that initializes the HTTP client with a shared
   /// io_context,
-  ///          a remote endpoint, a worker, and a timeout duration.
+  ///          a remote endpoint, and a timeout duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param remote_endpoint, the remote endpoint to connect to.
-  /// @param worker, the shared worker.
   /// @param timeout, the timeout duration for operations.
   explicit HttpClient(std::shared_ptr<boost::asio::io_context> const& ioc,
                       boost::asio::ip::tcp::endpoint remote_endpoint,
-                      std::shared_ptr<simpleio::Worker> const& worker,
                       std::chrono::duration<int> timeout)
       : io_ctx_(ioc),
         remote_endpoint_(std::move(remote_endpoint)),
         stream_(*ioc),
         timeout_(timeout),
-        Client<ServiceT>(worker) {}
+        Client<ServiceT>() {}
 
   /// @brief Asynchronously sends a request and returns a future for the
   /// response.
@@ -180,17 +178,14 @@ class HttpServerSession
  public:
   /// @brief Constructor that initializes the asynchronous HTTP server session
   /// with a request
-  ///          callback, a worker, a timeout duration, and a socket.
+  ///          callback, a timeout duration, and a socket.
   /// @param request_cb, the callback function to handle incoming requests.
-  /// @param worker, the shared worker to process requests.
   /// @param timeout, the timeout duration for operations.
   /// @param socket, the socket to use for the session.
   explicit HttpServerSession(
       typename Server<ServiceT>::request_callback_t request_cb,
-      std::shared_ptr<Worker> worker, std::chrono::duration<int> timeout,
-      boost::asio::ip::tcp::socket&& socket)
+      std::chrono::duration<int> timeout, boost::asio::ip::tcp::socket&& socket)
       : request_cb_(request_cb),
-        worker_(std::move(worker)),
         timeout_(timeout),
         stream_(std::move(socket)) {}
 
@@ -230,18 +225,16 @@ class HttpServerSession
         << "HttpServerSession received request and is handling it.";
 
     auto self = this->shared_from_this();
-    this->worker_->push([self] {
+    boost::asio::dispatch(self->stream_.get_executor(), [self]() mutable {
       self->res_ =
           self->request_cb_(typename ServiceT::RequestT(self->req_)).entity();
-      boost::asio::dispatch(self->stream_.get_executor(), [self]() mutable {
-        BOOST_LOG_TRIVIAL(debug)
-            << "Callback returned response entity: " << self->res_;
-        bool keep_alive = self->res_.keep_alive();
-        boost::beast::http::async_write(
-            self->stream_, std::move(self->res_),
-            boost::beast::bind_front_handler(
-                &HttpServerSession<ServiceT>::teardown, self, keep_alive));
-      });
+      BOOST_LOG_TRIVIAL(debug)
+          << "Callback returned response entity: " << self->res_;
+      bool keep_alive = self->res_.keep_alive();
+      boost::beast::http::async_write(
+          self->stream_, std::move(self->res_),
+          boost::beast::bind_front_handler(
+              &HttpServerSession<ServiceT>::teardown, self, keep_alive));
     });
   }
 
@@ -271,7 +264,6 @@ class HttpServerSession
   }
 
   typename Server<ServiceT>::request_callback_t request_cb_;
-  std::shared_ptr<Worker> worker_;
   std::chrono::duration<int> timeout_;
   boost::beast::tcp_stream stream_;
   boost::beast::flat_buffer buffer_;  // (Must persist between reads)
@@ -292,24 +284,22 @@ class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
  public:
   /// @brief Constructor that initializes the HTTP server with a shared
   /// io_context,
-  ///          a local endpoint, a request callback, a worker, and a timeout
+  ///          a local endpoint, a request callback, and a timeout
   ///          duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param local_endpoint, the local endpoint to bind the server to.
   /// @param request_cb, the callback function to handle incoming requests.
-  /// @param worker, the shared worker to process requests.
   /// @param timeout, the timeout duration for operations.
   HttpServer(
       std::shared_ptr<boost::asio::io_context> ioc,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       std::function<typename ServiceT::ResponseT(typename ServiceT::RequestT)>
           request_cb,
-      std::shared_ptr<simpleio::Worker> worker,
       std::chrono::duration<int> timeout)
       : ioc_(std::move(ioc)),
         acceptor_(*ioc_),
         timeout_(timeout),
-        Server<ServiceT>(std::move(request_cb), std::move(worker)) {
+        Server<ServiceT>(std::move(request_cb)) {
     boost::beast::error_code err_code;
     acceptor_.open(local_endpoint.protocol(), err_code);
 
@@ -374,8 +364,8 @@ class HttpServer : public std::enable_shared_from_this<HttpServer<ServiceT>>,
     }
     BOOST_LOG_TRIVIAL(debug) << "HttpServer accepted a connection.";
 
-    std::make_shared<HttpServerSession<ServiceT>>(
-        this->request_cb_, this->worker_, timeout_, std::move(socket))
+    std::make_shared<HttpServerSession<ServiceT>>(this->request_cb_, timeout_,
+                                                  std::move(socket))
         ->run();
 
     start_accepting();

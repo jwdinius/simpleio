@@ -56,12 +56,3 @@ target_link_libraries(test_transports_ip
 )
 add_test(NAME test_transports_ip COMMAND test_transports_ip)
 set_tests_properties(test_transports_ip PROPERTIES TIMEOUT 10)
-
-add_executable(test_worker test_worker.cpp)
-target_link_libraries(test_worker
-  PRIVATE
-    ${GTEST_LIBRARIES}
-    pthread
-    ${PROJECT_NAME}::worker
-)
-add_test(NAME test_worker COMMAND test_worker)

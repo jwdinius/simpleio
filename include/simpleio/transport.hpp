@@ -3,15 +3,14 @@
 #pragma once
 
 #include <functional>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "simpleio/async_queue.hpp"
 #include "simpleio/message.hpp"
-#include "simpleio/worker.hpp"
 
 namespace simpleio {
 /// @brief Exception thrown when a transport error occurs at runtime.
@@ -57,15 +56,11 @@ class Receiver {
   ///                    received. The function must not modify shared state
   ///                    without protecting concurrent accesses and must not
   ///                    throw exceptions.
-  /// @param worker, the worker to use for processing messages.
   /// @throws TransportException, if the message callback or worker is null.
-  explicit Receiver(callback_t message_cb, std::shared_ptr<Worker> worker)
-      : message_cb_(std::move(message_cb)), worker_(std::move(worker)) {
+  explicit Receiver(callback_t message_cb)
+      : message_cb_(std::move(message_cb)) {
     if (!message_cb_) {
       throw TransportException("Message callback cannot be null.");
-    }
-    if (!worker_) {
-      throw TransportException("Worker cannot be null.");
     }
   }
 
@@ -78,14 +73,9 @@ class Receiver {
   ///          It pushes the message to the worker for processing.
   ///          This method should not throw exceptions.
   /// @param message, the received message.
-  void on_read(MessageT const& message) {
-    worker_->push([this](message_t const& msg) { return message_cb_(msg); },
-                  message);
-  }
+  virtual void on_read(MessageT const& message) = 0;
 
- private:
   callback_t message_cb_;
-  std::shared_ptr<Worker> worker_;
 };
 
 /// @brief Client interface
@@ -96,16 +86,8 @@ class Receiver {
 template <typename ServiceT>
 class Client {
  public:
-  /// @brief Default constructor deleted.
-  Client() = delete;
-
-  /// @brief Constructor that takes a shared pointer to a Worker.
-  /// @details This constructor initializes the client with a worker that will
-  /// be used to process requests and/or responses. The specifics are deferred
-  /// to the derived classes.
-  /// @param worker, the shared pointer to the Worker
-  explicit Client(std::shared_ptr<Worker> worker)
-      : worker_(std::move(worker)) {}
+  /// @brief Default constructor.
+  Client() = default;
 
   /// @brief Default destructor.
   ~Client() = default;
@@ -123,9 +105,6 @@ class Client {
   /// hold the response.
   virtual std::future<typename ServiceT::ResponseT> send_request_async(
       typename ServiceT::RequestT const& req) = 0;
-
- private:
-  std::shared_ptr<Worker> worker_;
 };
 
 /// @brief Server interface
@@ -156,17 +135,14 @@ class Server {
   /// used to process requests and/or send responses.
   /// @param request_cb, the callback function to call when a request is
   /// received.
-  /// @param worker, the shared pointer to the Worker that will be used to
-  ///                process requests and/or send responses.
-  explicit Server(request_callback_t request_cb, std::shared_ptr<Worker> worker)
-      : request_cb_(std::move(request_cb)), worker_(std::move(worker)) {}
+  explicit Server(request_callback_t request_cb)
+      : request_cb_(std::move(request_cb)) {}
 
   /// @brief Default destructor.
   ~Server() = default;
 
  protected:
   request_callback_t request_cb_;
-  std::shared_ptr<Worker> worker_;
 };
 
 }  // namespace simpleio

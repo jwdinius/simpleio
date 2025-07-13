@@ -16,7 +16,6 @@
 #include "simpleio/transports/ip/tcp.hpp"
 #include "simpleio/transports/ip/tls.hpp"
 #include "simpleio/transports/ip/udp.hpp"
-#include "simpleio/worker.hpp"
 
 namespace simpleio::transports::ip {
 
@@ -42,15 +41,8 @@ class IoWorker {
   /// @return The shared task scheduler.
   [[nodiscard]] std::shared_ptr<boost::asio::io_context> scheduler() const;
 
-  /// @brief Get the shared callback executor.
-  /// @details Senders and Receivers within the same process should share the
-  ///          same executor to ensure that the same thread is used for
-  ///          processing callbacks with received messages.
-  [[nodiscard]] std::shared_ptr<simpleio::Worker> executor() const;
-
  private:
   std::shared_ptr<boost::asio::io_context> scheduler_;
-  std::shared_ptr<simpleio::Worker> executor_;
   std::unique_ptr<
       boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>
       lifecycle_manager_;
@@ -91,7 +83,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
   auto io_ctx = io_wrkr->scheduler();
   switch (scheme) {
     case Scheme::TCP: {
-      return std::make_shared<TcpSender<MessageT>>(
+      return TcpSender<MessageT>::create(
           io_ctx, boost::asio::ip::tcp::endpoint(
                       boost::asio::ip::address::from_string(options.remote_ip),
                       options.remote_port));
@@ -100,7 +92,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       if (!options.tls_config) {
         throw TransportException("TLS config is required for TLS scheme");
       }
-      return std::make_shared<TlsSender<MessageT>>(
+      return TlsSender<MessageT>::create(
           io_ctx, options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.remote_ip),
@@ -108,10 +100,11 @@ std::shared_ptr<Sender<MessageT>> make_sender(
     }
     case Scheme::UDP: {
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
-      return std::make_shared<UdpSender<MessageT>>(
-          socket, boost::asio::ip::udp::endpoint(
-                      boost::asio::ip::address::from_string(options.remote_ip),
-                      options.remote_port));
+      return UdpSender<MessageT>::create(
+          std::move(socket),
+          boost::asio::ip::udp::endpoint(
+              boost::asio::ip::address::from_string(options.remote_ip),
+              options.remote_port));
     }
     case Scheme::UDP_BROADCAST: {
       auto addr = boost::asio::ip::make_address(options.remote_ip);
@@ -126,7 +119,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       auto endpoint =
           boost::asio::ip::udp::endpoint(addr.to_v4(), options.remote_port);
 
-      return std::make_shared<UdpSender<MessageT>>(socket, endpoint);
+      return UdpSender<MessageT>::create(std::move(socket), endpoint);
     }
     case Scheme::UDP_MULTICAST: {
       auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
@@ -167,7 +160,7 @@ std::shared_ptr<Sender<MessageT>> make_sender(
       socket->set_option(boost::asio::ip::multicast::enable_loopback(
           options.loopback.value()));
 
-      return std::make_shared<UdpSender<MessageT>>(socket, endpoint);
+      return UdpSender<MessageT>::create(std::move(socket), endpoint);
     }
     default:
       throw TransportException("Control fell through for make_sender" +
@@ -209,18 +202,17 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
     ReceiverOptions const& options) {
   // NOLINTEND [build/namespaces]
   auto io_ctx = io_wrkr->scheduler();
-  auto callback_handler = io_wrkr->executor();
   switch (scheme) {
     case Scheme::TCP: {
       if (!options.local_ip) {
         throw TransportException("Local IP is required for TCP scheme");
       }
-      return std::make_shared<TcpReceiver<MessageT>>(
+      return TcpReceiver<MessageT>::create(
           io_ctx,
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          message_cb, callback_handler);
+          std::move(message_cb));
     }
     case Scheme::TLS: {
       if (!options.local_ip) {
@@ -229,12 +221,12 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
       if (!options.tls_config) {
         throw TransportException("TLS config is required for TLS scheme");
       }
-      return std::make_shared<TlsReceiver<MessageT>>(
+      return TlsReceiver<MessageT>::create(
           io_ctx, options.tls_config.value(),
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          message_cb, callback_handler);
+          message_cb);
     }
     case Scheme::UDP: {
       if (!options.local_ip) {
@@ -245,16 +237,16 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
           boost::asio::ip::udp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port));
-      return std::make_shared<UdpReceiver<MessageT>>(
-          std::move(socket), message_cb, callback_handler);
+      return UdpReceiver<MessageT>::create(std::move(socket),
+                                           std::move(message_cb));
     }
     case Scheme::UDP_BROADCAST: {
       // listen on all interfaces: 0.0.0.0
       auto socket = std::make_unique<boost::asio::ip::udp::socket>(
           *io_ctx, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(),
                                                   options.local_port));
-      return std::make_shared<UdpReceiver<MessageT>>(
-          std::move(socket), message_cb, callback_handler);
+      return UdpReceiver<MessageT>::create(std::move(socket),
+                                           std::move(message_cb));
     }
     case Scheme::UDP_MULTICAST: {
       // Parse and validate the address
@@ -283,9 +275,8 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
         // 0 means "let OS choose default"
         socket->set_option(boost::asio::ip::multicast::join_group(
             multicast_addr.to_v6(), options.ipv6_interface.value_or(0)));
-
-        return std::make_shared<UdpReceiver<MessageT>>(
-            std::move(socket), message_cb, callback_handler);
+        return UdpReceiver<MessageT>::create(std::move(socket),
+                                             std::move(message_cb));
       }
       auto socket = std::make_unique<boost::asio::ip::udp::socket>(*io_ctx);
       socket->open(boost::asio::ip::udp::v4());
@@ -299,8 +290,8 @@ std::shared_ptr<Receiver<MessageT>> make_receiver(
       socket->set_option(
           boost::asio::ip::multicast::join_group(multicast_addr.to_v4()));
 
-      return std::make_shared<UdpReceiver<MessageT>>(
-          std::move(socket), message_cb, callback_handler);
+      return UdpReceiver<MessageT>::create(std::move(socket),
+                                           std::move(message_cb));
     }
     default:
       throw TransportException("Control fell through for make_receiver" +
@@ -328,7 +319,6 @@ std::shared_ptr<Client<ServiceT>> make_client(
     SenderOptions const& options) {
   // NOLINTEND [build/namespaces]
   auto io_ctx = io_wrkr->scheduler();
-  auto callback_handler = io_wrkr->executor();
   if (!options.timeout) {
     throw TransportException("Timeout is required for client requests");
   }
@@ -339,7 +329,7 @@ std::shared_ptr<Client<ServiceT>> make_client(
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.remote_ip),
               options.remote_port),
-          callback_handler, options.timeout.value());
+          options.timeout.value());
     }
     case Scheme::HTTPS: {
       if (!options.tls_config) {
@@ -350,7 +340,7 @@ std::shared_ptr<Client<ServiceT>> make_client(
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.remote_ip),
               options.remote_port),
-          callback_handler, options.timeout.value());
+          options.timeout.value());
     }
     default:
       throw TransportException("Control fell through for make_client" +
@@ -385,7 +375,6 @@ std::shared_ptr<Server<ServiceT>> make_server(
     throw TransportException("Timeout is required for client requests");
   }
   auto io_ctx = io_wrkr->scheduler();
-  auto callback_handler = io_wrkr->executor();
   switch (scheme) {
     case Scheme::HTTP: {
       auto server = std::make_shared<HttpServer<ServiceT>>(
@@ -393,7 +382,7 @@ std::shared_ptr<Server<ServiceT>> make_server(
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          request_cb, callback_handler, options.timeout.value());
+          request_cb, options.timeout.value());
       server->start();
       return server;
     }
@@ -406,7 +395,7 @@ std::shared_ptr<Server<ServiceT>> make_server(
           boost::asio::ip::tcp::endpoint(
               boost::asio::ip::address::from_string(options.local_ip.value()),
               options.local_port),
-          request_cb, callback_handler, options.timeout.value());
+          request_cb, options.timeout.value());
       server->start();
       return server;
     }

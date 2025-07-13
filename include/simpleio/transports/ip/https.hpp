@@ -33,24 +33,22 @@ class HttpsClient : public std::enable_shared_from_this<HttpsClient<ServiceT>>,
  public:
   /// @brief Constructor that initializes the HTTPS client with a shared
   /// io_context,
-  ///          a TLS configuration, a remote endpoint, a worker, and a timeout
+  ///          a TLS configuration, a remote endpoint, and a timeout
   ///          duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param tls_config, the TLS configuration to use for secure connections.
   /// @param remote_endpoint, the remote endpoint to connect to.
-  /// @param worker, the shared worker.
   /// @param timeout, the timeout duration for operations.
   explicit HttpsClient(std::shared_ptr<boost::asio::io_context> const& ioc,
                        TlsConfig const& tls_config,
                        boost::asio::ip::tcp::endpoint remote_endpoint,
-                       std::shared_ptr<simpleio::Worker> const& worker,
                        std::chrono::duration<int> timeout)
       : io_ctx_(ioc),
         remote_endpoint_(std::move(remote_endpoint)),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
         stream_(*ioc, ssl_ctx_),
         timeout_(timeout),
-        Client<ServiceT>(worker) {
+        Client<ServiceT>() {
     try {
       ssl_ctx_.load_verify_file(tls_config.ca_file.string());
       ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());
@@ -213,21 +211,18 @@ class HttpsServerSession
  public:
   /// @brief Constructor that initializes the asynchronous HTTP server session
   /// with a request
-  ///          callback, a worker, a timeout duration, a TCP socket, and an SSL
+  ///          callback, a timeout duration, a TCP socket, and an SSL
   ///          context.
   /// @param request_cb, the callback function to handle incoming requests.
-  /// @param worker, the shared worker to process requests.
   /// @param timeout, the timeout duration for operations.
   /// @param socket, the socket to use for the session.
   /// @param ssl_ctx, the shared pointer to the SSL context for secure
   /// connections.
   explicit HttpsServerSession(
       typename Server<ServiceT>::request_callback_t request_cb,
-      std::shared_ptr<Worker> worker, std::chrono::duration<int> timeout,
-      boost::asio::ip::tcp::socket&& socket,
+      std::chrono::duration<int> timeout, boost::asio::ip::tcp::socket&& socket,
       std::shared_ptr<boost::asio::ssl::context> const& ssl_ctx)
       : request_cb_(request_cb),
-        worker_(std::move(worker)),
         timeout_(timeout),
         stream_(std::move(socket), *ssl_ctx) {}
 
@@ -269,18 +264,16 @@ class HttpsServerSession
         << "HttpsServerSession received request and is handling it.";
 
     auto self = this->shared_from_this();
-    this->worker_->push([self] {
+    boost::asio::dispatch(self->stream_.get_executor(), [self]() mutable {
       self->res_ =
           self->request_cb_(typename ServiceT::RequestT(self->req_)).entity();
-      boost::asio::dispatch(self->stream_.get_executor(), [self]() mutable {
-        BOOST_LOG_TRIVIAL(debug)
-            << "Callback returned response entity: " << self->res_;
-        bool keep_alive = self->res_.keep_alive();
-        boost::beast::http::async_write(
-            self->stream_, std::move(self->res_),
-            boost::beast::bind_front_handler(
-                &HttpsServerSession<ServiceT>::teardown, self, keep_alive));
-      });
+      BOOST_LOG_TRIVIAL(debug)
+          << "Callback returned response entity: " << self->res_;
+      bool keep_alive = self->res_.keep_alive();
+      boost::beast::http::async_write(
+          self->stream_, std::move(self->res_),
+          boost::beast::bind_front_handler(
+              &HttpsServerSession<ServiceT>::teardown, self, keep_alive));
     });
   }
 
@@ -314,7 +307,6 @@ class HttpsServerSession
   }
 
   typename Server<ServiceT>::request_callback_t request_cb_;
-  std::shared_ptr<Worker> worker_;
   std::chrono::duration<int> timeout_;
   boost::beast::ssl_stream<boost::beast::tcp_stream> stream_;
   boost::beast::flat_buffer buffer_;  // (Must persist between reads)
@@ -342,21 +334,19 @@ class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
   /// @param tls_config, the TLS configuration to use for secure connections.
   /// @param local_endpoint, the local endpoint to bind the server to.
   /// @param request_cb, the callback function to handle incoming requests.
-  /// @param worker, the shared worker to process requests.
   /// @param timeout, the timeout duration for operations.
   HttpsServer(
       std::shared_ptr<boost::asio::io_context> ioc, TlsConfig const& tls_config,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       std::function<typename ServiceT::ResponseT(typename ServiceT::RequestT)>
           request_cb,
-      std::shared_ptr<simpleio::Worker> worker,
       std::chrono::duration<int> timeout)
       : ioc_(std::move(ioc)),
         ssl_ctx_(std::make_shared<boost::asio::ssl::context>(
             boost::asio::ssl::context::tlsv13)),
         acceptor_(*ioc_),
         timeout_(timeout),
-        Server<ServiceT>(std::move(request_cb), std::move(worker)) {
+        Server<ServiceT>(std::move(request_cb)) {
     try {
       ssl_ctx_->load_verify_file(tls_config.ca_file.string());
       ssl_ctx_->use_certificate_chain_file(tls_config.cert_file.string());
@@ -432,8 +422,8 @@ class HttpsServer : public std::enable_shared_from_this<HttpsServer<ServiceT>>,
     }
     BOOST_LOG_TRIVIAL(debug) << "HttpsServer accepted a connection.";
 
-    std::make_shared<HttpsServerSession<ServiceT>>(
-        this->request_cb_, this->worker_, timeout_, std::move(socket), ssl_ctx_)
+    std::make_shared<HttpsServerSession<ServiceT>>(this->request_cb_, timeout_,
+                                                   std::move(socket), ssl_ctx_)
         ->run();
 
     start_accepting();

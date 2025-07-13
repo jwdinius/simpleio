@@ -28,10 +28,6 @@ add_library(${PROJECT_NAME}::messages::xml ALIAS messages_xml)
 add_library(transports_ip SHARED)
 add_library(${PROJECT_NAME}::transports::ip ALIAS transports_ip)
 
-# Worker class
-add_library(worker INTERFACE)
-add_library(${PROJECT_NAME}::worker ALIAS worker)
-
 add_subdirectory(include)
 add_subdirectory(src)
 
@@ -53,7 +49,6 @@ install(
     messages_json
     messages_xml
     transports_ip
-    worker
   EXPORT ${PROJECT_NAME}Targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

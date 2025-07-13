@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <boost/asio.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/log/trivial.hpp>
 #include <memory>
 #include <string>
@@ -16,14 +17,27 @@ namespace simpleio::transports::ip {
 ///          to a specified remote endpoint.
 /// @tparam MessageT, the type of message to send.
 template <typename MessageT>
-class TcpSender : public Sender<MessageT> {
+class TcpSender : public Sender<MessageT>,
+                  public std::enable_shared_from_this<TcpSender<MessageT>> {
  public:
   /// @brief Construct from a shared io_context and a remote endpoint.
   /// @param io_ctx, the shared io_context.
   /// @param remote_endpoint, the remote endpoint to send to.
   explicit TcpSender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                      boost::asio::ip::tcp::endpoint remote_endpoint)
-      : socket_(*io_ctx), remote_endpoint_(std::move(remote_endpoint)) {}
+      : socket_(*io_ctx),
+        remote_endpoint_(std::move(remote_endpoint)),
+        strand_(boost::asio::make_strand(*io_ctx)) {}
+
+  /// @brief Factory function to create a TcpSender.
+  /// @param io_ctx, the shared io_context.
+  /// @param remote_endpoint, the remote endpoint to send to.
+  /// @return A shared pointer to the created TcpSender.
+  static std::shared_ptr<TcpSender<MessageT>> create(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::tcp::endpoint remote_endpoint) {
+    return std::make_shared<TcpSender<MessageT>>(io_ctx, remote_endpoint);
+  }
 
   /// @brief Send a message.
   /// @details This method connects to the remote endpoint and sends the message
@@ -31,18 +45,21 @@ class TcpSender : public Sender<MessageT> {
   /// @param msg, the message to send.
   void send(MessageT const& msg) override {
     connect();
+    auto self = this->shared_from_this();
     auto const& blob = msg.blob();
     boost::asio::async_write(
         socket_, boost::asio::buffer(blob.data(), blob.size()),
-        [this](boost::system::error_code err_code, std::size_t bytes_sent) {
-          if (!err_code) {
-            BOOST_LOG_TRIVIAL(debug) << "Sent " << bytes_sent << " bytes "
-                                     << " to " << remote_endpoint_;
-          } else {
-            BOOST_LOG_TRIVIAL(error)
-                << "Error sending data: " << err_code.message();
-          }
-        });
+        boost::asio::bind_executor(
+            strand_,
+            [self](boost::system::error_code err_code, size_t bytes_sent) {
+              if (!err_code) {
+                BOOST_LOG_TRIVIAL(debug) << "Sent " << bytes_sent << " bytes "
+                                         << " to " << self->remote_endpoint_;
+              } else {
+                BOOST_LOG_TRIVIAL(error)
+                    << "Error sending data: " << err_code.message();
+              }
+            }));
     socket_.close();
   }
 
@@ -62,6 +79,7 @@ class TcpSender : public Sender<MessageT> {
 
   boost::asio::ip::tcp::socket socket_;
   boost::asio::ip::tcp::endpoint remote_endpoint_;
+  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 
 /// @brief Strategy for receiving messages over TCP
@@ -72,7 +90,8 @@ class TcpSender : public Sender<MessageT> {
 /// @tparam F, the type of callback function to execute when a message is
 ///          received.
 template <typename MessageT>
-class TcpReceiver : public Receiver<MessageT> {
+class TcpReceiver : public Receiver<MessageT>,
+                    public std::enable_shared_from_this<TcpReceiver<MessageT>> {
  public:
   /// @brief Construct from a shared io_context and a local endpoint
   /// @param io_ctx, the shared io_context.
@@ -81,14 +100,27 @@ class TcpReceiver : public Receiver<MessageT> {
   ///                    received. The function must not modify shared state
   ///                    without protecting concurrent accesses and must not
   ///                    throw exceptions.
-  /// @param worker, the worker to use for processing messages.
   explicit TcpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
                        boost::asio::ip::tcp::endpoint const& local_endpoint,
-                       typename Receiver<MessageT>::callback_t message_cb,
-                       std::shared_ptr<simpleio::Worker> const& worker)
+                       typename Receiver<MessageT>::callback_t message_cb)
       : acceptor_(*io_ctx, local_endpoint),
-        Receiver<MessageT>(std::move(message_cb), worker) {
-    start_accepting();
+        strand_(boost::asio::make_strand(*io_ctx)),
+        Receiver<MessageT>(std::move(message_cb)) {}
+
+  /// @brief Factory function to create a TcpReceiver.
+  /// @param io_ctx, the shared io_context.
+  /// @param local_endpoint, local endpoint to listen on.
+  /// @param message_cb, the callback function to call when a message is
+  /// received.
+  /// @return A shared pointer to the created TcpReceiver.
+  static std::shared_ptr<TcpReceiver<MessageT>> create(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::tcp::endpoint const& local_endpoint,
+      typename Receiver<MessageT>::callback_t message_cb) {
+    auto receiver = std::make_shared<TcpReceiver<MessageT>>(
+        io_ctx, local_endpoint, std::move(message_cb));
+    receiver->start_accepting();
+    return receiver;
   }
 
   /// @brief Destructor
@@ -103,6 +135,16 @@ class TcpReceiver : public Receiver<MessageT> {
     }
   }
 
+ protected:
+  /// @brief Handle a received message.
+  /// @details This function is called when a message is received.
+  /// @param message, the received message.
+  void on_read(MessageT const& message) override {
+    auto self = this->shared_from_this();
+    boost::asio::dispatch(strand_,
+                          [self, message]() { self->message_cb_(message); });
+  }
+
  private:
   /// @brief Start accepting incoming connections.
   /// @details This method sets up an asynchronous accept operation to listen
@@ -111,17 +153,21 @@ class TcpReceiver : public Receiver<MessageT> {
   void start_accepting() {
     auto socket = std::make_shared<boost::asio::ip::tcp::socket>(
         acceptor_.get_executor());
+    auto self = this->shared_from_this();
     acceptor_.async_accept(
-        *socket, [this, socket](boost::system::error_code err_code) {
-          if (!err_code) {
-            BOOST_LOG_TRIVIAL(info) << "Accepted connection from peer at "
-                                    << socket->remote_endpoint();
-            start_receiving(socket);
-          } else {
-            BOOST_LOG_TRIVIAL(error) << "Accept failed: " << err_code.message();
-          }
-          start_accepting();
-        });
+        *socket,
+        boost::asio::bind_executor(
+            strand_, [self, socket](boost::system::error_code err_code) {
+              if (!err_code) {
+                BOOST_LOG_TRIVIAL(info) << "Accepted connection from peer at "
+                                        << socket->remote_endpoint();
+                self->start_receiving(socket);
+              } else {
+                BOOST_LOG_TRIVIAL(error)
+                    << "Accept failed: " << err_code.message();
+              }
+              self->start_accepting();
+            }));
   }
 
   /// @brief  Start receiving messages from a socket provisioned to receive
@@ -130,26 +176,29 @@ class TcpReceiver : public Receiver<MessageT> {
   void start_receiving(
       std::shared_ptr<boost::asio::ip::tcp::socket> const& socket) {
     auto buffer = std::make_shared<std::string>(MessageT::max_blob_size, '\0');
-
+    auto self = this->shared_from_this();
     boost::asio::async_read(
         *socket, boost::asio::buffer(buffer->data(), buffer->size()),
-        [this, buffer, socket](boost::system::error_code err_code,
-                               size_t bytes_recvd) {
-          // We expect the client to close the connection after sending a
-          // message i.e., "Open-Squirt-Close" for the simplest case
-          if (err_code == boost::asio::error::eof && bytes_recvd > 0) {
-            BOOST_LOG_TRIVIAL(debug) << "Received " << bytes_recvd << " bytes.";
-            buffer->resize(bytes_recvd);
-            this->on_read(MessageT(*buffer));
-            start_receiving(socket);
-          } else {
-            BOOST_LOG_TRIVIAL(error)
-                << "Error receiving data: " << err_code.message();
-          }
-        });
+        boost::asio::bind_executor(
+            strand_, [self, buffer, socket](boost::system::error_code err_code,
+                                            size_t bytes_recvd) {
+              // We expect the client to close the connection after sending a
+              // message i.e., "Open-Squirt-Close" for the simplest case
+              if (err_code == boost::asio::error::eof && bytes_recvd > 0) {
+                BOOST_LOG_TRIVIAL(debug)
+                    << "Received " << bytes_recvd << " bytes.";
+                buffer->resize(bytes_recvd);
+                self->on_read(MessageT(*buffer));
+                self->start_receiving(socket);
+              } else {
+                BOOST_LOG_TRIVIAL(error)
+                    << "Error receiving data: " << err_code.message();
+              }
+            }));
   }
 
   boost::asio::ip::tcp::acceptor acceptor_;
+  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 
 }  // namespace simpleio::transports::ip

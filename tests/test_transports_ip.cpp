@@ -103,7 +103,6 @@ class TestNetworkTransportSendReceive : public ::testing::Test {
 
   void TearDown() override {
     io_worker_->scheduler().reset();
-    io_worker_->executor().reset();
     io_worker_.reset();
   }
 
@@ -365,7 +364,6 @@ class TestNetworkTransportRequestRespond : public ::testing::Test {
 
   void TearDown() override {
     io_worker_->scheduler().reset();
-    io_worker_->executor().reset();
     io_worker_.reset();
   }
 

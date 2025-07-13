@@ -8,9 +8,7 @@
 using namespace simpleio::transports::ip;  // NOLINT [build/namespaces]
 namespace basio = boost::asio;
 
-IoWorker::IoWorker()
-    : scheduler_(std::make_shared<basio::io_context>()),
-      executor_(std::make_shared<simpleio::Worker>(1)) {
+IoWorker::IoWorker() : scheduler_(std::make_shared<basio::io_context>()) {
   BOOST_LOG_TRIVIAL(debug) << "Created IoWorker with shared io_context";
   BOOST_LOG_TRIVIAL(debug) << "Starting io_context thread";
   // Prevent io_context from exiting when idle.
@@ -29,7 +27,6 @@ IoWorker::~IoWorker() {
   BOOST_LOG_TRIVIAL(debug) << "Stopping io_context thread";
   lifecycle_manager_.reset();
   scheduler_->stop();
-  executor_->shutdown();
   if (scheduler_thread_.joinable()) {
     scheduler_thread_.join();
   }
@@ -38,8 +35,4 @@ IoWorker::~IoWorker() {
 
 std::shared_ptr<boost::asio::io_context> IoWorker::scheduler() const {
   return scheduler_;
-}
-
-std::shared_ptr<simpleio::Worker> IoWorker::executor() const {
-  return executor_;
 }

@@ -9,6 +9,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "simpleio/transport.hpp"
 #include "simpleio/transports/ip/http.hpp"
@@ -19,17 +20,18 @@
 
 namespace simpleio::transports::ip {
 
-/// @brief Enumeration of transport schemes.
-enum class Scheme { HTTP, HTTPS, TCP, TLS, UDP, UDP_BROADCAST, UDP_MULTICAST };
-
 /// @brief IO worker.
 /// @details An IoWorker sets up a shared task scheduler, lifecycle manager,
 ///          and callback executor for sending and receiving messages over
 ///          network interfaces within a single process.
 class IoWorker {
  public:
-  /// @brief Constructor.
+  /// @brief Default constructor
+  /// @details Creates an io context running on a single thread
   IoWorker();
+
+  /// @brief Constructor specifying number of threads for io context
+  explicit IoWorker(uint8_t num_threads);
 
   /// @brief Destructor.
   ~IoWorker();
@@ -46,6 +48,6 @@ class IoWorker {
   std::unique_ptr<
       boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>
       lifecycle_manager_;
-  std::thread scheduler_thread_;
+  std::vector<std::thread> scheduler_threads_;
 };
 }  // namespace simpleio::transports::ip

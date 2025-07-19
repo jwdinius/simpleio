@@ -348,6 +348,7 @@ class Server : public simpleio::Server<ServiceT>,
             boost::asio::ssl::context::tlsv13)),
         acceptor_(*ioc_),
         timeout_(timeout),
+        strand_(boost::asio::make_strand(*ioc_)),
         simpleio::Server<ServiceT>(std::move(request_cb)) {
     try {
       ssl_ctx_->load_verify_file(config.ca_file.string());
@@ -434,9 +435,9 @@ class Server : public simpleio::Server<ServiceT>,
   void start_accepting() {
     BOOST_LOG_TRIVIAL(debug)
         << "https::Server started, start accepting connections.";
-    acceptor_.async_accept(
-        *ioc_, boost::beast::bind_front_handler(&Server<ServiceT>::accept,
-                                                this->shared_from_this()));
+    acceptor_.async_accept(boost::asio::bind_executor(
+        strand_, boost::beast::bind_front_handler(&Server<ServiceT>::accept,
+                                                  this->shared_from_this())));
   }
 
   /// @brief Start the HTTPS Server session after connecting the socket.
@@ -458,5 +459,6 @@ class Server : public simpleio::Server<ServiceT>,
   boost::asio::ip::tcp::acceptor acceptor_;
   std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
   std::chrono::duration<int> timeout_;
+  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 }  // namespace simpleio::transports::ip::https

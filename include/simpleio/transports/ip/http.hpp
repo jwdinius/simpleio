@@ -300,6 +300,7 @@ class Server : public simpleio::Server<ServiceT>,
       : ioc_(std::move(ioc)),
         acceptor_(*ioc_),
         timeout_(timeout),
+        strand_(boost::asio::make_strand(*ioc_)),
         simpleio::Server<ServiceT>(std::move(request_cb)) {
     boost::beast::error_code err_code;
     acceptor_.open(local_endpoint.protocol(), err_code);
@@ -373,9 +374,9 @@ class Server : public simpleio::Server<ServiceT>,
   void start_accepting() {
     BOOST_LOG_TRIVIAL(debug)
         << "http::Server started, start accepting connections.";
-    acceptor_.async_accept(
-        *ioc_, boost::beast::bind_front_handler(&Server<ServiceT>::accept,
-                                                this->shared_from_this()));
+    acceptor_.async_accept(boost::asio::bind_executor(
+        strand_, boost::beast::bind_front_handler(&Server<ServiceT>::accept,
+                                                  this->shared_from_this())));
   }
 
   /// @brief Accepts an incoming connection and starts a new session to handle
@@ -397,5 +398,6 @@ class Server : public simpleio::Server<ServiceT>,
   std::shared_ptr<boost::asio::io_context> ioc_;
   boost::asio::ip::tcp::acceptor acceptor_;
   std::chrono::duration<int> timeout_;
+  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 }  // namespace simpleio::transports::ip::http

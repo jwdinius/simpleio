@@ -9,23 +9,32 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports::ip {
+namespace simpleio::transports::ip::udp {
+
+/// @brief Create a UDP endpoint
+/// @param ip_address, IP (v4 or v6) address
+/// @param port, port number
+/// @return UDP endpoint
+boost::asio::ip::udp::endpoint create_endpoint(const char* ip_address,
+                                               uint16_t port) {
+  return {boost::asio::ip::address::from_string(ip_address), port};
+}
 
 /// @brief Strategy for sending messages over UDP (User Datagram Protocol).
 /// @details This class uses a UDP socket to send messages of type MessageT
 ///          to a specified remote endpoint.
 /// @tparam MessageT, the type of message to send.
 template <typename MessageT>
-class UdpSender : public Sender<MessageT>,
-                  public std::enable_shared_from_this<UdpSender<MessageT>> {
+class Sender : public simpleio::Sender<MessageT>,
+               public std::enable_shared_from_this<Sender<MessageT>> {
   using executor_type = typename boost::asio::ip::udp::socket::executor_type;
 
  public:
   /// @brief Construct from an io_context and a remote endpoint.
   /// @param socket, the (possibly shared) socket to use.
   /// @param remote_endpoint, the remote endpoint to send to.
-  explicit UdpSender(std::shared_ptr<boost::asio::ip::udp::socket> socket,
-                     boost::asio::ip::udp::endpoint remote_endpoint)
+  explicit Sender(std::shared_ptr<boost::asio::ip::udp::socket> socket,
+                  boost::asio::ip::udp::endpoint remote_endpoint)
       : socket_(std::move(socket)),
         remote_endpoint_(std::move(remote_endpoint)),
         strand_(boost::asio::make_strand(socket_->get_executor())) {
@@ -39,21 +48,76 @@ class UdpSender : public Sender<MessageT>,
         << " Local endpoint: " << socket_->local_endpoint();
   }
 
-  /// @brief Factory function to create a UdpSender.
-  /// @param socket, the (possibly shared) socket to use.
-  /// @param remote_endpoint, the remote endpoint to send to.
-  /// @return A shared pointer to the created UdpSender.
-  static std::shared_ptr<UdpSender<MessageT>> create(
-      std::shared_ptr<boost::asio::ip::udp::socket> socket,
+  /// @brief Factory function to create a udp::Sender.
+  /// @details Constructs a (unicast) receiver
+  /// @param io_ctx, the shared io_context.
+  /// @param remote_endpoint, endpoint to send messages to.
+  /// @return A shared pointer to an initialized tcp::Sender.
+  static std::shared_ptr<Sender<MessageT>> create_unicast(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::udp::endpoint remote_endpoint) {
-    return std::make_shared<UdpSender<MessageT>>(std::move(socket),
-                                                 std::move(remote_endpoint));
+    auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
+    return std::make_shared<Sender<MessageT>>(std::move(socket),
+                                              remote_endpoint);
+  }
+
+  /// @brief Factory function to create a udp::Sender.
+  /// @details Constructs a (broadcast) receiver
+  /// @param io_ctx, the shared io_context.
+  /// @param remote_endpoint, broadcast endpoint to send messages to.
+  /// @return A shared pointer to an initialized tcp::Sender.
+  /// @throw TransportException if address is not IPv4
+  static std::shared_ptr<Sender<MessageT>> create_broadcast(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::udp::endpoint remote_endpoint) {
+    auto const& addr = remote_endpoint.address();
+    if (!addr.is_v4()) {
+      throw TransportException("Broadcast only supported for IPv4.");
+    }
+    auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
+    socket->open(boost::asio::ip::udp::v4());
+    socket->set_option(boost::asio::socket_base::broadcast(true));
+    return std::make_shared<Sender<MessageT>>(socket, remote_endpoint);
+  }
+
+  /// @brief Factory function to create a udp::Sender.
+  /// @details Constructs a (multicast) receiver
+  /// @param io_ctx, the shared io_context.
+  /// @param remote_endpoint, multicast endpoint to send messages to.
+  /// @return A shared pointer to an initialized tcp::Sender.
+  /// @throw TransportException if address is not a multicast address
+  static std::shared_ptr<Sender<MessageT>> create_multicast(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::udp::endpoint remote_endpoint, uint8_t hops,
+      bool loopback, uint8_t interface_v6 = 0) {
+    auto const& addr = remote_endpoint.address();
+    if (!addr.is_multicast()) {
+      throw TransportException(
+          "Provided address is not a valid multicast address");
+    }
+
+    auto socket = std::make_shared<boost::asio::ip::udp::socket>(*io_ctx);
+    if (addr.is_v4()) {
+      socket->open(boost::asio::ip::udp::v4());
+    } else if (addr.is_v6()) {
+      socket->open(boost::asio::ip::udp::v6());
+      // Specify the interface index (e.g., eth0 = 2)
+      // 0 means "let OS choose default"
+      socket->set_option(
+          boost::asio::ip::multicast::join_group(addr.to_v6(), interface_v6));
+    } else {
+      throw TransportException("Invalid multicast address: must be v4 or v6");
+    }
+
+    socket->set_option(boost::asio::ip::multicast::hops(hops));
+    socket->set_option(boost::asio::ip::multicast::enable_loopback(loopback));
+    return std::make_shared<Sender<MessageT>>(socket, remote_endpoint);
   }
 
   /// @brief Destructor.
   /// @details This destructor closes the socket if it is open, catching any
   ///          exceptions that may occur during closure.
-  ~UdpSender() override {
+  ~Sender() override {
     try {
       if (socket_->is_open()) {
         socket_->close();
@@ -98,69 +162,93 @@ class UdpSender : public Sender<MessageT>,
 /// @tparam F, the type of callback function to execute when a message is
 ///          received.
 template <typename MessageT>
-class UdpReceiver : public Receiver<MessageT>,
-                    public std::enable_shared_from_this<UdpReceiver<MessageT>> {
+class Receiver : public simpleio::Receiver<MessageT>,
+                 public std::enable_shared_from_this<Receiver<MessageT>> {
   using executor_type = typename boost::asio::ip::udp::socket::executor_type;
 
  public:
-  /// @brief Construct from a shared io_context and a local endpoint
-  /// @param io_ctx, the shared io_context.
-  /// @param local_endpoint, local endpoint to listen on.
+  /// @brief Construct from a shared io_context and a socket.
+  /// @param socket, a configured socket to listen to.
   /// @param message_cb, the callback function to call when a message is
   ///                    received. The function must not modify shared state
   ///                    without protecting concurrent accesses and must not
   ///                    throw exceptions.
-  explicit UdpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                       boost::asio::ip::udp::endpoint const& local_endpoint,
-                       typename Receiver<MessageT>::callback_t message_cb)
-      : socket_(std::make_unique<boost::asio::ip::udp::socket>(*io_ctx,
-                                                               local_endpoint)),
-        strand_(boost::asio::make_strand(*io_ctx)),
-        Receiver<MessageT>(std::move(message_cb)) {
+  explicit Receiver(
+      std::unique_ptr<boost::asio::ip::udp::socket> socket,
+      typename simpleio::Receiver<MessageT>::callback_t message_cb)
+      : socket_(std::move(socket)),
+        strand_(boost::asio::make_strand(socket_->get_executor())),
+        simpleio::Receiver<MessageT>(std::move(message_cb)) {
     BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
   }
 
-  /// @brief Factory function to create a UdpReceiver.
+  /// @brief Factory function to create a Receiver.
   /// @param io_ctx, the shared io_context.
-  /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   /// received.
-  /// @return A shared pointer to the created UdpReceiver.
-  static std::shared_ptr<UdpReceiver<MessageT>> create(
+  /// @return A shared pointer to the created Receiver.
+  static std::shared_ptr<Receiver<MessageT>> create_unicast(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
-      boost::asio::ip::udp::endpoint const& local_endpoint,
+      boost::asio::ip::udp::endpoint local_endpoint,
       typename Receiver<MessageT>::callback_t message_cb) {
-    auto receiver = std::make_shared<UdpReceiver<MessageT>>(
-        io_ctx, local_endpoint, std::move(message_cb));
+    auto socket =
+        std::make_unique<boost::asio::ip::udp::socket>(*io_ctx, local_endpoint);
+    auto receiver = std::make_shared<Receiver<MessageT>>(std::move(socket),
+                                                         std::move(message_cb));
     receiver->start_receiving();
     return receiver;
   }
 
-  /// @brief Construct from a shared io_context and a socket.
-  /// @param io_ctx, the shared io_context.
-  /// @param socket, a configured socket to listen to.
-  /// @param message_cb, the callback function to call when a message is
-  ///                    received. The function must not modify shared state
-  ///                    without protecting concurrent accesses and must not
-  ///                    throw exceptions.
-  explicit UdpReceiver(std::unique_ptr<boost::asio::ip::udp::socket> socket,
-                       typename Receiver<MessageT>::callback_t message_cb)
-      : socket_(std::move(socket)),
-        strand_(boost::asio::make_strand(socket_->get_executor())),
-        Receiver<MessageT>(std::move(message_cb)) {
-    BOOST_LOG_TRIVIAL(debug) << "Listening on " << socket_->local_endpoint();
+  static std::shared_ptr<Receiver<MessageT>> create_broadcast(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      uint16_t local_port, typename Receiver<MessageT>::callback_t message_cb) {
+    auto socket = std::make_unique<boost::asio::ip::udp::socket>(
+        *io_ctx,
+        boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), local_port));
+    auto receiver = std::make_shared<Receiver<MessageT>>(std::move(socket),
+                                                         std::move(message_cb));
+    receiver->start_receiving();
+    return receiver;
   }
 
-  /// @brief Factory function to create a UdpReceiver.
-  /// @param socket, a configured socket to listen to.
-  /// @param message_cb, the callback function to call when a message is
-  /// received.
-  /// @return A shared pointer to the created UdpReceiver.
-  static std::shared_ptr<UdpReceiver<MessageT>> create(
-      std::unique_ptr<boost::asio::ip::udp::socket> socket,
-      typename Receiver<MessageT>::callback_t message_cb) {
-    auto receiver = std::make_shared<UdpReceiver<MessageT>>(
-        std::move(socket), std::move(message_cb));
+  static std::shared_ptr<Receiver<MessageT>> create_multicast(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::udp::endpoint const& local_endpoint,
+      typename Receiver<MessageT>::callback_t message_cb,
+      uint8_t interface_v6 = 0) {
+    auto const& addr = local_endpoint.address();
+    if (!addr.is_multicast()) {
+      throw TransportException(
+          "Provided address is not a valid multicast address");
+    }
+
+    if (addr.is_v6()) {
+      boost::asio::ip::udp::endpoint listen_endpoint(boost::asio::ip::udp::v6(),
+                                                     local_endpoint.port());
+      auto socket = std::make_unique<boost::asio::ip::udp::socket>(*io_ctx);
+      socket->open(boost::asio::ip::udp::v6());
+      socket->set_option(boost::asio::ip::udp::socket::reuse_address(true));
+      socket->bind(listen_endpoint);
+      // Specify the interface index (e.g., eth0 = 2)
+      // 0 means "let OS choose default"
+      socket->set_option(
+          boost::asio::ip::multicast::join_group(addr.to_v6(), interface_v6));
+      auto receiver = std::make_shared<Receiver<MessageT>>(
+          std::move(socket), std::move(message_cb));
+      receiver->start_receiving();
+      return receiver;
+    }
+    auto socket = std::make_unique<boost::asio::ip::udp::socket>(*io_ctx);
+    socket->open(boost::asio::ip::udp::v4());
+    // Allow multiple listeners on the same port
+    socket->set_option(boost::asio::ip::udp::socket::reuse_address(true));
+    socket->bind(boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(),
+                                                local_endpoint.port()));
+    // Join multicast group
+    socket->set_option(boost::asio::ip::multicast::join_group(addr.to_v4()));
+
+    auto receiver = std::make_shared<Receiver<MessageT>>(std::move(socket),
+                                                         std::move(message_cb));
     receiver->start_receiving();
     return receiver;
   }
@@ -168,7 +256,7 @@ class UdpReceiver : public Receiver<MessageT>,
   /// @brief Destructor.
   /// @details This destructor closes the socket if it is open, catching any
   ///          exceptions that may occur during closure.
-  ~UdpReceiver() override {
+  ~Receiver() override {
     try {
       socket_->close();
     } catch (std::exception const& e) {
@@ -216,4 +304,4 @@ class UdpReceiver : public Receiver<MessageT>,
   std::unique_ptr<boost::asio::ip::udp::socket> socket_;
   boost::asio::strand<executor_type> strand_;
 };
-}  // namespace simpleio::transports::ip
+}  // namespace simpleio::transports::ip::udp

@@ -10,34 +10,33 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports::ip {
+namespace simpleio::transports::ip::tcp {
+
+/// @brief Create a TCP endpoint
+/// @param ip_address, IP (v4 or v6) address
+/// @param port, port number
+/// @return TCP endpoint
+boost::asio::ip::tcp::endpoint create_endpoint(const char* ip_address,
+                                               uint16_t port) {
+  return {boost::asio::ip::address::from_string(ip_address), port};
+}
 
 /// @brief Strategy for sending messages over TCP
 /// @details This class uses a TCP socket to send messages of type MessageT
 ///          to a specified remote endpoint.
 /// @tparam MessageT, the type of message to send.
 template <typename MessageT>
-class TcpSender : public Sender<MessageT>,
-                  public std::enable_shared_from_this<TcpSender<MessageT>> {
+class Sender : public simpleio::Sender<MessageT>,
+               public std::enable_shared_from_this<Sender<MessageT>> {
  public:
   /// @brief Construct from a shared io_context and a remote endpoint.
   /// @param io_ctx, the shared io_context.
   /// @param remote_endpoint, the remote endpoint to send to.
-  explicit TcpSender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                     boost::asio::ip::tcp::endpoint remote_endpoint)
+  explicit Sender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+                  boost::asio::ip::tcp::endpoint remote_endpoint)
       : socket_(*io_ctx),
         remote_endpoint_(std::move(remote_endpoint)),
         strand_(boost::asio::make_strand(*io_ctx)) {}
-
-  /// @brief Factory function to create a TcpSender.
-  /// @param io_ctx, the shared io_context.
-  /// @param remote_endpoint, the remote endpoint to send to.
-  /// @return A shared pointer to the created TcpSender.
-  static std::shared_ptr<TcpSender<MessageT>> create(
-      std::shared_ptr<boost::asio::io_context> const& io_ctx,
-      boost::asio::ip::tcp::endpoint remote_endpoint) {
-    return std::make_shared<TcpSender<MessageT>>(io_ctx, remote_endpoint);
-  }
 
   /// @brief Send a message.
   /// @details This method connects to the remote endpoint and sends the message
@@ -68,6 +67,7 @@ class TcpSender : public Sender<MessageT>,
   void connect() {
     BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
     boost::system::error_code err_code;
+    // TODO(jdinius): replace with async_connect
     socket_.connect(remote_endpoint_, err_code);
     if (!err_code) {
       BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
@@ -90,8 +90,8 @@ class TcpSender : public Sender<MessageT>,
 /// @tparam F, the type of callback function to execute when a message is
 ///          received.
 template <typename MessageT>
-class TcpReceiver : public Receiver<MessageT>,
-                    public std::enable_shared_from_this<TcpReceiver<MessageT>> {
+class Receiver : public simpleio::Receiver<MessageT>,
+                 public std::enable_shared_from_this<Receiver<MessageT>> {
  public:
   /// @brief Construct from a shared io_context and a local endpoint
   /// @param io_ctx, the shared io_context.
@@ -100,25 +100,27 @@ class TcpReceiver : public Receiver<MessageT>,
   ///                    received. The function must not modify shared state
   ///                    without protecting concurrent accesses and must not
   ///                    throw exceptions.
-  explicit TcpReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                       boost::asio::ip::tcp::endpoint const& local_endpoint,
-                       typename Receiver<MessageT>::callback_t message_cb)
+  explicit Receiver(
+      std::shared_ptr<boost::asio::io_context> const& io_ctx,
+      boost::asio::ip::tcp::endpoint const& local_endpoint,
+      typename simpleio::Receiver<MessageT>::callback_t message_cb)
       : acceptor_(*io_ctx, local_endpoint),
         strand_(boost::asio::make_strand(*io_ctx)),
-        Receiver<MessageT>(std::move(message_cb)) {}
+        simpleio::Receiver<MessageT>(std::move(message_cb)) {}
 
-  /// @brief Factory function to create a TcpReceiver.
+  /// @brief Factory function to create a tcp::Receiver.
+  /// @details Constructs a receiver and starts accepting connections
   /// @param io_ctx, the shared io_context.
   /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   /// received.
-  /// @return A shared pointer to the created TcpReceiver.
-  static std::shared_ptr<TcpReceiver<MessageT>> create(
+  /// @return A shared pointer to an initialized tcp::Receiver.
+  static std::shared_ptr<Receiver<MessageT>> create(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       typename Receiver<MessageT>::callback_t message_cb) {
-    auto receiver = std::make_shared<TcpReceiver<MessageT>>(
-        io_ctx, local_endpoint, std::move(message_cb));
+    auto receiver = std::make_shared<Receiver<MessageT>>(io_ctx, local_endpoint,
+                                                         std::move(message_cb));
     receiver->start_accepting();
     return receiver;
   }
@@ -127,7 +129,7 @@ class TcpReceiver : public Receiver<MessageT>,
   /// @details This destructor closes the acceptor socket to stop accepting new
   ///          connections.
   /// @throw std::exception, if an error occurs while closing the acceptor.
-  ~TcpReceiver() {
+  ~Receiver() {
     try {
       acceptor_.close();
     } catch (std::exception const& e) {
@@ -201,4 +203,4 @@ class TcpReceiver : public Receiver<MessageT>,
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 
-}  // namespace simpleio::transports::ip
+}  // namespace simpleio::transports::ip::tcp

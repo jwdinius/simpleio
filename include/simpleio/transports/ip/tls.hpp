@@ -12,12 +12,12 @@
 
 #include "simpleio/transport.hpp"
 
-namespace simpleio::transports::ip {
+namespace simpleio::transports::ip::tls {
 
-/// @brief Configuration for TLS v1.3 transport.
+/// @brief Credentials files for TLS v1.3 transport.
 /// @details This struct holds the paths to the Certificate Authority (CA) file,
 ///          the certificate file, and the private key file.
-struct TlsConfig {
+struct Credentials {
   std::filesystem::path ca_file;
   std::filesystem::path cert_file;
   std::filesystem::path key_file;
@@ -28,19 +28,19 @@ struct TlsConfig {
 ///          securely to a specified remote endpoint.
 /// @tparam MessageT, the type of message to send.
 template <typename MessageT>
-class TlsSender : public Sender<MessageT>,
-                  public std::enable_shared_from_this<TlsSender<MessageT>> {
+class Sender : public simpleio::Sender<MessageT>,
+               public std::enable_shared_from_this<Sender<MessageT>> {
  public:
-  /// @brief Construct from a shared io_context, a TLS configuration, and a
+  /// @brief Construct from a shared io_context, Credentials struct, and a
   /// remote endpoint.
   /// @param io_ctx, the shared io_context.
-  /// @param tls_config, the TLS configuration to use.
   /// @param remote_endpoint, the remote endpoint to send to.
+  /// @param config, Credentials struct to use.
   /// @throw TransportException, if an error occurs while setting up the SSL
   /// context.
-  explicit TlsSender(std::shared_ptr<boost::asio::io_context> io_ctx,
-                     TlsConfig const& tls_config,
-                     boost::asio::ip::tcp::endpoint remote_endpoint)
+  explicit Sender(std::shared_ptr<boost::asio::io_context> io_ctx,
+                  boost::asio::ip::tcp::endpoint remote_endpoint,
+                  Credentials const& config)
       : io_ctx_(std::move(io_ctx)),
         remote_endpoint_(std::move(remote_endpoint)),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
@@ -49,9 +49,9 @@ class TlsSender : public Sender<MessageT>,
             *io_ctx_, ssl_ctx_)),
         strand_(boost::asio::make_strand(*io_ctx_)) {
     try {
-      ssl_ctx_.load_verify_file(tls_config.ca_file.string());
-      ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());
-      ssl_ctx_.use_private_key_file(tls_config.key_file.string(),
+      ssl_ctx_.load_verify_file(config.ca_file.string());
+      ssl_ctx_.use_certificate_chain_file(config.cert_file.string());
+      ssl_ctx_.use_private_key_file(config.key_file.string(),
                                     boost::asio::ssl::context::pem);
     } catch (std::exception const& e) {
       std::ostringstream error_stream;
@@ -59,21 +59,6 @@ class TlsSender : public Sender<MessageT>,
       BOOST_LOG_TRIVIAL(error) << error_stream.str();
       throw TransportException(error_stream.str());
     }
-  }
-
-  /// @brief Factory function to create a TlsSender.
-  /// @param io_ctx, the shared io_context.
-  /// @param tls_config, the TLS configuration to use.
-  /// @param remote_endpoint, the remote endpoint to send to.
-  /// @return A shared pointer to the created TlsSender.
-  /// @throw TransportException, if an error occurs while setting up the SSL
-  /// context.
-  static std::shared_ptr<TlsSender<MessageT>> create(
-      std::shared_ptr<boost::asio::io_context> const& io_ctx,
-      TlsConfig const& tls_config,
-      boost::asio::ip::tcp::endpoint remote_endpoint) {
-    return std::make_shared<TlsSender<MessageT>>(io_ctx, tls_config,
-                                                 remote_endpoint);
   }
 
   /// @brief Send a message.
@@ -154,32 +139,32 @@ class TlsSender : public Sender<MessageT>,
 ///          processed by a callback function.
 /// @tparam MessageT, the type of message to receive.
 template <typename MessageT>
-class TlsReceiver : public Receiver<MessageT>,
-                    public std::enable_shared_from_this<TlsReceiver<MessageT>> {
+class Receiver : public simpleio::Receiver<MessageT>,
+                 public std::enable_shared_from_this<Receiver<MessageT>> {
  public:
-  /// @brief Construct from a shared io_context, a TLS configuration, a local
+  /// @brief Construct from a shared io_context, Credentials struct, a local
   /// endpoint, and a callback function.
   /// @param io_ctx, the shared io_context.
-  /// @param tls_config, the TLS configuration to use.
   /// @param local_endpoint, the local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   ///                    received. The function must not modify shared state
   ///                    without protecting concurrent accesses and must not
   ///                    throw exceptions.
+  /// @param config, Credentials struct to use.
   /// @throw TransportException, if an error occurs while setting up the SSL
   /// context.
-  TlsReceiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-              TlsConfig const& tls_config,
-              boost::asio::ip::tcp::endpoint const& local_endpoint,
-              typename Receiver<MessageT>::callback_t message_cb)
+  Receiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+           boost::asio::ip::tcp::endpoint const& local_endpoint,
+           typename simpleio::Receiver<MessageT>::callback_t message_cb,
+           Credentials const& config)
       : acceptor_(*io_ctx, local_endpoint),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
         strand_(boost::asio::make_strand(*io_ctx)),
-        Receiver<MessageT>(std::move(message_cb)) {
+        simpleio::Receiver<MessageT>(std::move(message_cb)) {
     try {
-      ssl_ctx_.load_verify_file(tls_config.ca_file.string());
-      ssl_ctx_.use_certificate_chain_file(tls_config.cert_file.string());
-      ssl_ctx_.use_private_key_file(tls_config.key_file.string(),
+      ssl_ctx_.load_verify_file(config.ca_file.string());
+      ssl_ctx_.use_certificate_chain_file(config.cert_file.string());
+      ssl_ctx_.use_private_key_file(config.key_file.string(),
                                     boost::asio::ssl::context::pem);
     } catch (std::exception const& e) {
       std::ostringstream error_stream;
@@ -189,28 +174,27 @@ class TlsReceiver : public Receiver<MessageT>,
     }
   }
 
-  /// @brief Factory function to create a TlsReceiver.
+  /// @brief Factory function to create a tls::Receiver.
+  /// @details Constructs a receiver and starts accepting connections
   /// @param io_ctx, the shared io_context.
-  /// @param tls_config, the TLS configuration to use.
   /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   /// received.
-  /// @return A shared pointer to the created TlsReceiver.
-  /// @throw TransportException, if an error occurs while setting up the SSL
-  /// context.
-  static std::shared_ptr<TlsReceiver<MessageT>> create(
+  /// @param config, Credentials struct to use.
+  /// @return A shared pointer to an initialized tls::Receiver.
+  static std::shared_ptr<Receiver<MessageT>> create(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
-      TlsConfig const& tls_config,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
-      typename Receiver<MessageT>::callback_t message_cb) {
-    auto receiver = std::make_shared<TlsReceiver<MessageT>>(
-        io_ctx, tls_config, local_endpoint, std::move(message_cb));
+      typename Receiver<MessageT>::callback_t message_cb,
+      Credentials const& config) {
+    auto receiver = std::make_shared<Receiver<MessageT>>(
+        io_ctx, local_endpoint, std::move(message_cb), config);
     receiver->start_accepting();
     return receiver;
   }
 
   /// @brief Destructor
-  ~TlsReceiver() override {
+  ~Receiver() override {
     try {
       acceptor_.close();
     } catch (std::exception const& e) {
@@ -311,4 +295,4 @@ class TlsReceiver : public Receiver<MessageT>,
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
 
-}  // namespace simpleio::transports::ip
+}  // namespace simpleio::transports::ip::tls

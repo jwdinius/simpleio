@@ -53,9 +53,7 @@ class Receiver {
 
   /// @brief Constructor.
   /// @param message_cb, the callback function to call when a message is
-  ///                    received. The function must not modify shared state
-  ///                    without protecting concurrent accesses and must not
-  ///                    throw exceptions.
+  ///                    received. The function should not throw exceptions.
   /// @throws TransportException, if the message callback or worker is null.
   explicit Receiver(callback_t message_cb)
       : message_cb_(std::move(message_cb)) {

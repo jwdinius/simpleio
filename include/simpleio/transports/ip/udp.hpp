@@ -170,9 +170,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @brief Construct from a shared io_context and a socket.
   /// @param socket, a configured socket to listen to.
   /// @param message_cb, the callback function to call when a message is
-  ///                    received. The function must not modify shared state
-  ///                    without protecting concurrent accesses and must not
-  ///                    throw exceptions.
+  ///                    received.
   explicit Receiver(
       std::unique_ptr<boost::asio::ip::udp::socket> socket,
       typename simpleio::Receiver<MessageT>::callback_t message_cb)

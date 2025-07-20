@@ -171,9 +171,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param io_ctx, the shared io_context.
   /// @param local_endpoint, the local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
-  ///                    received. The function must not modify shared state
-  ///                    without protecting concurrent accesses and must not
-  ///                    throw exceptions.
+  ///                    received.
   /// @param config, Credentials struct to use.
   /// @throw TransportException, if an error occurs while setting up the SSL
   /// context.

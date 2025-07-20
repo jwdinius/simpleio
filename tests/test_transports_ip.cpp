@@ -43,6 +43,7 @@ static constexpr const char* TEST_IPV6_ADDR = "::1";
 static constexpr const char* TEST_IPV6_MULTICAST_ADDR = "ff02::1";
 static constexpr uint16_t TEST_PORT_NUM = 12345;
 static constexpr size_t MAX_ITERS = 10;
+static constexpr uint8_t NUM_IO_WORKER_THREADS = 2;
 
 class SimpleStringSerializer : public sio::Serializer<std::string> {
  public:
@@ -67,6 +68,8 @@ class TestNetworkTransportSendReceive : public ::testing::Test {
  public:
   TestNetworkTransportSendReceive() : message_() {
     BOOST_LOG_TRIVIAL(debug) << "TestNetworkTransport constructor";
+
+    io_worker_ = std::make_shared<siotrns::ip::IoWorker>(NUM_IO_WORKER_THREADS);
 
     /// @brief Callback function to handle received messages.
     /// @details Check that the received message matches the expected

@@ -44,9 +44,6 @@ class Sender : public simpleio::Sender<MessageT>,
       : io_ctx_(std::move(io_ctx)),
         remote_endpoint_(std::move(remote_endpoint)),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
-        socket_(std::make_unique<
-                boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(
-            *io_ctx_, ssl_ctx_)),
         strand_(boost::asio::make_strand(*io_ctx_)) {
     try {
       ssl_ctx_.load_verify_file(config.ca_file.string());
@@ -54,81 +51,108 @@ class Sender : public simpleio::Sender<MessageT>,
       ssl_ctx_.use_private_key_file(config.key_file.string(),
                                     boost::asio::ssl::context::pem);
     } catch (std::exception const& e) {
-      std::ostringstream error_stream;
-      error_stream << "Error setting up TLSv1.3 context: " << e.what();
-      BOOST_LOG_TRIVIAL(error) << error_stream.str();
-      throw TransportException(error_stream.str());
+      std::ostringstream oss;
+      oss << "Error setting up TLSv1.3 context: " << e.what();
+      BOOST_LOG_TRIVIAL(error) << oss.str();
+      throw TransportException(oss.str());
     }
   }
 
   /// @brief Send a message.
-  /// @details This method connects to the remote endpoint and sends the message
-  ///          securely and asynchronously.
+  /// @details This method creates a new session for each message.
+  ///          Sessions connect and send the message asynchronously.
   /// @param msg, the message to send.
   void send(MessageT const& msg) override {
-    connect();
-    auto self = this->shared_from_this();
-    auto const& blob = msg.blob();
-    boost::asio::async_write(
-        *socket_, boost::asio::buffer(blob.data(), blob.size()),
-        boost::asio::bind_executor(
-            strand_,
-            [self](boost::system::error_code err_code, size_t bytes_sent) {
-              if (!err_code) {
-                BOOST_LOG_TRIVIAL(debug)
-                    << "Sent " << bytes_sent << " bytes securely to "
-                    << self->remote_endpoint_;
-              } else {
-                BOOST_LOG_TRIVIAL(error)
-                    << "Error sending data: " << err_code.message();
-              }
-            }));
-    close();
+    auto session = std::make_shared<Session>(io_ctx_, ssl_ctx_, strand_,
+                                             remote_endpoint_, msg.blob());
+    session->start();
   }
 
  private:
-  /// @brief Connect to the remote endpoint.
-  void connect() {
-    BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
-    // Reset the socket to reuse the existing SSL context
-    socket_ = std::make_unique<
-        boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*io_ctx_,
-                                                                ssl_ctx_);
-    socket_->lowest_layer().open(remote_endpoint_.protocol());
+  class Session : public std::enable_shared_from_this<Session> {
+   public:
+    Session(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+            boost::asio::ssl::context& ssl_ctx,
+            boost::asio::strand<boost::asio::io_context::executor_type> strand,
+            boost::asio::ip::tcp::endpoint endpoint, std::string blob)
+        : socket_(*io_ctx, ssl_ctx),
+          strand_(std::move(strand)),
+          remote_endpoint_(std::move(endpoint)),
+          blob_(std::move(blob)) {}
 
-    // Attempt to establish a new connection
-    boost::system::error_code err_code;
-    socket_->lowest_layer().connect(remote_endpoint_, err_code);
-    if (!err_code) {
-      BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
-
-      // Perform TLS handshake
-      socket_->handshake(boost::asio::ssl::stream_base::client, err_code);
-      if (!err_code) {
-        BOOST_LOG_TRIVIAL(debug) << "TLSv1.3 Handshake successful!";
-      } else {
-        BOOST_LOG_TRIVIAL(error)
-            << "TLSv1.3 Handshake failed: " << err_code.message();
-      }
-    } else {
-      BOOST_LOG_TRIVIAL(error) << "Failed to connect: " << err_code.message();
+    void start() {
+      auto self = this->shared_from_this();
+      socket_.lowest_layer().async_connect(
+          remote_endpoint_,
+          boost::asio::bind_executor(
+              strand_, [self](boost::system::error_code err_code) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "TCP connect failed: " << err_code.message();
+                  return;
+                }
+                BOOST_LOG_TRIVIAL(debug)
+                    << "TCP connected, starting TLS handshake";
+                self->handshake();
+              }));
     }
-    BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
-  }
 
-  /// @brief Close the connection.
-  void close() {
-    BOOST_LOG_TRIVIAL(debug) << "Closing connection to " << remote_endpoint_;
-    boost::system::error_code err_code;
-    socket_->shutdown(err_code);
-    socket_.reset();
-    BOOST_LOG_TRIVIAL(debug) << "Closed connection to " << remote_endpoint_;
-  }
+   private:
+    void handshake() {
+      auto self = this->shared_from_this();
+      socket_.async_handshake(
+          boost::asio::ssl::stream_base::client,
+          boost::asio::bind_executor(
+              strand_, [self](boost::system::error_code err_code) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "TLS handshake failed: " << err_code.message();
+                  return;
+                }
+                BOOST_LOG_TRIVIAL(debug) << "TLS handshake succeeded";
+                self->write();
+              }));
+    }
+
+    void write() {
+      auto self = this->shared_from_this();
+      boost::asio::async_write(
+          socket_, boost::asio::buffer(blob_.data(), blob_.size()),
+          boost::asio::bind_executor(
+              strand_,
+              [self](boost::system::error_code err_code, std::size_t bytes) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "TLS write failed: " << err_code.message();
+                } else {
+                  BOOST_LOG_TRIVIAL(debug)
+                      << "Sent " << bytes << " bytes securely";
+                }
+                self->shutdown();
+              }));
+    }
+
+    void shutdown() {
+      auto self = this->shared_from_this();
+      socket_.async_shutdown(boost::asio::bind_executor(
+          strand_, [self](boost::system::error_code err_code) {
+            if (err_code && err_code != boost::asio::error::eof) {
+              BOOST_LOG_TRIVIAL(error)
+                  << "TLS shutdown failed: " << err_code.message();
+            } else {
+              BOOST_LOG_TRIVIAL(debug) << "TLS shutdown completed";
+            }
+          }));
+    }
+
+    boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::ip::tcp::endpoint remote_endpoint_;
+    std::string blob_;
+  };
 
   std::shared_ptr<boost::asio::io_context> const io_ctx_;
   boost::asio::ssl::context ssl_ctx_;
-  std::unique_ptr<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>
-      socket_;
   boost::asio::ip::tcp::endpoint remote_endpoint_;
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };

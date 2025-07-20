@@ -21,6 +21,7 @@ boost::asio::ip::tcp::endpoint create_endpoint(const char* ip_address,
   return {boost::asio::ip::address::from_string(ip_address), port};
 }
 
+/*
 /// @brief Strategy for sending messages over TCP
 /// @details This class uses a TCP socket to send messages of type MessageT
 ///          to a specified remote endpoint.
@@ -78,6 +79,97 @@ class Sender : public simpleio::Sender<MessageT>,
   }
 
   boost::asio::ip::tcp::socket socket_;
+  boost::asio::ip::tcp::endpoint remote_endpoint_;
+  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+};
+*/
+
+/// @brief Strategy for sending messages over TCP
+/// @details This class uses a TCP socket to send messages of type MessageT
+///          to a specified remote endpoint.
+/// @tparam MessageT, the type of message to send.
+template <typename MessageT>
+class Sender : public simpleio::Sender<MessageT>,
+               public std::enable_shared_from_this<Sender<MessageT>> {
+ public:
+  /// @brief Construct from a shared io_context and a remote endpoint.
+  /// @param io_ctx, the shared io_context.
+  /// @param remote_endpoint, the remote endpoint to send to.
+  explicit Sender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+                  boost::asio::ip::tcp::endpoint remote_endpoint)
+      : io_ctx_(io_ctx),
+        remote_endpoint_(std::move(remote_endpoint)),
+        strand_(boost::asio::make_strand(*io_ctx)) {}
+
+  /// @brief Send a message.
+  /// @details This method creates a new session for each message.
+  ///          Sessions connect and send the message asynchronously.
+  /// @param msg, the message to send.
+  void send(MessageT const& msg) override {
+    auto session = std::make_shared<Session>(io_ctx_, remote_endpoint_, strand_,
+                                             msg.blob());
+    session->start();
+  }
+
+ private:
+  class Session : public std::enable_shared_from_this<Session> {
+   public:
+    Session(std::shared_ptr<boost::asio::io_context> const& io_ctx,
+            boost::asio::ip::tcp::endpoint endpoint,
+            boost::asio::strand<boost::asio::io_context::executor_type> strand,
+            std::string blob)
+        : socket_(*io_ctx),
+          remote_endpoint_(std::move(endpoint)),
+          strand_(std::move(strand)),
+          blob_(std::move(blob)) {}
+
+    void start() {
+      auto self = this->shared_from_this();
+      socket_.async_connect(
+          remote_endpoint_,
+          boost::asio::bind_executor(
+              strand_, [self](boost::system::error_code err_code) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "Failed to connect: " << err_code.message();
+                  return;
+                }
+                BOOST_LOG_TRIVIAL(debug)
+                    << "Connected to " << self->remote_endpoint_;
+                self->write();
+              }));
+    }
+
+   private:
+    void write() {
+      auto self = this->shared_from_this();
+      boost::asio::async_write(
+          socket_, boost::asio::buffer(blob_.data(), blob_.size()),
+          boost::asio::bind_executor(
+              strand_, [self](boost::system::error_code err_code,
+                              std::size_t bytes_sent) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "Write failed: " << err_code.message();
+                } else {
+                  BOOST_LOG_TRIVIAL(debug)
+                      << "Sent " << bytes_sent << " bytes to "
+                      << self->remote_endpoint_;
+                }
+                boost::system::error_code ignored_ec;
+                self->socket_.shutdown(
+                    boost::asio::ip::tcp::socket::shutdown_both, ignored_ec);
+                self->socket_.close(ignored_ec);
+              }));
+    }
+
+    boost::asio::ip::tcp::socket socket_;
+    boost::asio::ip::tcp::endpoint remote_endpoint_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    std::string const blob_;
+  };
+
+  std::shared_ptr<boost::asio::io_context> io_ctx_;
   boost::asio::ip::tcp::endpoint remote_endpoint_;
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };

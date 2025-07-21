@@ -2,7 +2,6 @@ target_sources(base
   INTERFACE
     FILE_SET HEADERS
     FILES
-      simpleio/async_queue.hpp
       simpleio/message.hpp
       simpleio/transport.hpp
 )
@@ -63,16 +62,4 @@ target_link_libraries(transports_ip
     base
     Boost::system
     OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
-)
-
-target_sources(worker
-  INTERFACE
-    FILE_SET HEADERS
-    FILES
-      simpleio/worker.hpp
-)
-
-target_link_libraries(worker
-  INTERFACE
-    base
 )

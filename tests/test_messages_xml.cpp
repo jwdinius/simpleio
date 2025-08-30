@@ -13,6 +13,7 @@
 
 namespace sio = simpleio;
 namespace siomsg = simpleio::messages;
+using XmlSerializer = siomsg::XmlSerializer<>;
 
 // Example test case using the test harness
 TEST(XmlMessageTest, TestPackUnpackNominal) {
@@ -23,8 +24,7 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   event->setAttribute("contents", "Hello, world!");
   doc->appendChild(event);
 
-  auto xml_msg =
-      std::make_shared<sio::Message<siomsg::XmlSerializer<>>>(std::move(doc));
+  auto xml_msg = std::make_shared<sio::Message<XmlSerializer>>(std::move(doc));
   {
     auto entity = xml_msg->entity();
     EXPECT_NE(entity, nullptr);
@@ -39,9 +39,8 @@ TEST(XmlMessageTest, TestPackUnpackNominal) {
   std::string serialized_xml_msg{xml_msg->blob()};
 
   // Create a new XmlMessage from the packed entity
-  auto xml_msg_from_serialized =
-      std::make_shared<sio::Message<siomsg::XmlSerializer<>>>(
-          std::move(serialized_xml_msg));
+  auto xml_msg_from_serialized = std::make_shared<sio::Message<XmlSerializer>>(
+      std::move(serialized_xml_msg));
 
   // Verify the unpacked XML document
   {

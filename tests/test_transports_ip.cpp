@@ -141,10 +141,34 @@ TEST_F(TestNetworkTransportSendReceive, TestTcpIPv6) {
   test_fn_(sndr);
 }
 
+/// @brief Test for TCP streaming with an IPv4 address
+TEST_F(TestNetworkTransportSendReceive, TestTcpStreamingIPv4) {
+  auto endpoint =
+      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 1);
+  auto rcvr = siotrns::ip::tcp::Receiver<SimpleString>::create(
+      io_worker_->scheduler(), endpoint, std::move(message_cb_));
+  auto sndr = std::make_shared<siotrns::ip::tcp::Sender<SimpleString>>(
+      io_worker_->scheduler(), endpoint, std::make_shared<sio::DefaultFramer>(),
+      true);
+  test_fn_(sndr);
+}
+
+/// @brief Test for TCP streaming with an IPv6 address
+TEST_F(TestNetworkTransportSendReceive, TestTcpStreamingIPv6) {
+  auto endpoint =
+      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 1);
+  auto rcvr = siotrns::ip::tcp::Receiver<SimpleString>::create(
+      io_worker_->scheduler(), endpoint, std::move(message_cb_));
+  auto sndr = std::make_shared<siotrns::ip::tcp::Sender<SimpleString>>(
+      io_worker_->scheduler(), endpoint, std::make_shared<sio::DefaultFramer>(),
+      true);
+  test_fn_(sndr);
+}
+
 /// @brief Test for TLS with an IPv4 address
 TEST_F(TestNetworkTransportSendReceive, TestTlsIPv4) {
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 2);
   auto rcvr_cert = siotrns::ip::tls::Credentials{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
       .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
@@ -163,7 +187,7 @@ TEST_F(TestNetworkTransportSendReceive, TestTlsIPv4) {
 /// @brief Test for TLS with an IPv6 address
 TEST_F(TestNetworkTransportSendReceive, TestTlsIPv6) {
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 2);
   auto rcvr_cert = siotrns::ip::tls::Credentials{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
       .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
@@ -176,6 +200,30 @@ TEST_F(TestNetworkTransportSendReceive, TestTlsIPv6) {
       .key_file = std::filesystem::path(CERTS_PATH) / "private/sender.key"};
   auto sndr = std::make_shared<siotrns::ip::tls::Sender<SimpleString>>(
       io_worker_->scheduler(), endpoint, sndr_cert);
+  test_fn_(sndr);
+}
+
+/// @brief Test for TLS streaming with an IPv4 address
+TEST_F(TestNetworkTransportSendReceive, TestTlsStreamingIPv4) {
+  auto endpoint =
+      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 3);
+  auto rcvr = siotrns::ip::tcp::Receiver<SimpleString>::create(
+      io_worker_->scheduler(), endpoint, std::move(message_cb_));
+  auto sndr = std::make_shared<siotrns::ip::tcp::Sender<SimpleString>>(
+      io_worker_->scheduler(), endpoint, std::make_shared<sio::DefaultFramer>(),
+      true);
+  test_fn_(sndr);
+}
+
+/// @brief Test for TLS streaming with an IPv6 address
+TEST_F(TestNetworkTransportSendReceive, TestTlsStreamingIPv6) {
+  auto endpoint =
+      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 3);
+  auto rcvr = siotrns::ip::tcp::Receiver<SimpleString>::create(
+      io_worker_->scheduler(), endpoint, std::move(message_cb_));
+  auto sndr = std::make_shared<siotrns::ip::tcp::Sender<SimpleString>>(
+      io_worker_->scheduler(), endpoint, std::make_shared<sio::DefaultFramer>(),
+      true);
   test_fn_(sndr);
 }
 
@@ -204,9 +252,9 @@ TEST_F(TestNetworkTransportSendReceive, TestUdpIPv6) {
 /// @brief Test UDP with a broadcast address (IPv4 only)
 TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv4) {
   auto rcvr = siotrns::ip::udp::Receiver<SimpleString>::create_broadcast(
-      io_worker_->scheduler(), TEST_PORT_NUM, std::move(message_cb_));
+      io_worker_->scheduler(), TEST_PORT_NUM + 1, std::move(message_cb_));
   auto broadcast_endpoint =
-      siotrns::ip::udp::create_endpoint(TEST_BROADCAST_ADDR, TEST_PORT_NUM);
+      siotrns::ip::udp::create_endpoint(TEST_BROADCAST_ADDR, TEST_PORT_NUM + 1);
   auto sndr = siotrns::ip::udp::Sender<SimpleString>::create_broadcast(
       io_worker_->scheduler(), broadcast_endpoint);
   test_fn_(sndr);
@@ -215,7 +263,7 @@ TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv4) {
 /// @brief Test UDP with an invalid broadcast address
 TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv6) {
   auto invalid_endpoint =
-      siotrns::ip::udp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM);
+      siotrns::ip::udp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 1);
   EXPECT_THROW(siotrns::ip::udp::Sender<SimpleString>::create_broadcast(
                    io_worker_->scheduler(), invalid_endpoint),
                sio::TransportException);
@@ -224,7 +272,7 @@ TEST_F(TestNetworkTransportSendReceive, TestUdpBroadcastIPv6) {
 /// @brief Test UDP MULTICAST with an IPv4 address
 TEST_F(TestNetworkTransportSendReceive, TestUdpMulticastIPv4) {
   auto endpoint = siotrns::ip::udp::create_endpoint(TEST_IPV4_MULTICAST_ADDR,
-                                                    TEST_PORT_NUM);
+                                                    TEST_PORT_NUM + 2);
   auto rcvr = siotrns::ip::udp::Receiver<SimpleString>::create_multicast(
       io_worker_->scheduler(), endpoint, std::move(message_cb_));
   auto sndr = siotrns::ip::udp::Sender<SimpleString>::create_multicast(
@@ -238,7 +286,7 @@ TEST_F(TestNetworkTransportSendReceive, TestUdpMulticastIPv6) {
     GTEST_SKIP() << "Skipping IPv6 multicast test on GitHub Actions";
   }
   auto endpoint = siotrns::ip::udp::create_endpoint(TEST_IPV6_MULTICAST_ADDR,
-                                                    TEST_PORT_NUM);
+                                                    TEST_PORT_NUM + 2);
   auto rcvr = siotrns::ip::udp::Receiver<SimpleString>::create_multicast(
       io_worker_->scheduler(), endpoint, std::move(message_cb_),
       /* interface_v6 */ 0);
@@ -342,7 +390,7 @@ class TestNetworkTransportRequestRespond : public ::testing::Test {
 TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv4) {
   auto timeout = std::chrono::seconds(1);
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 4);
   auto server = siotrns::ip::http::Server<ServiceT>::create(
       io_worker_->scheduler(), endpoint, std::move(request_cb_), timeout);
   EXPECT_NE(server, nullptr);
@@ -360,7 +408,7 @@ TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv4) {
 TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv6) {
   auto timeout = std::chrono::seconds(1);
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 4);
   auto server = siotrns::ip::http::Server<ServiceT>::create(
       io_worker_->scheduler(), endpoint, std::move(request_cb_), timeout);
   EXPECT_NE(server, nullptr);
@@ -378,7 +426,7 @@ TEST_F(TestNetworkTransportRequestRespond, TestHttpIPv6) {
 TEST_F(TestNetworkTransportRequestRespond, TestHttpsIPv4) {
   auto timeout = std::chrono::seconds(1);
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 1);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV4_ADDR, TEST_PORT_NUM + 5);
   auto srvr_cert = siotrns::ip::tls::Credentials{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
       .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
@@ -397,15 +445,13 @@ TEST_F(TestNetworkTransportRequestRespond, TestHttpsIPv4) {
 
   create_request(endpoint);
   test_fn_(client);
-  client.reset();  // Ensure client is reset after test
-  server.reset();  // Ensure server is reset after test
 }
 
 /// @brief Test HTTPS with an IPv6 address
 TEST_F(TestNetworkTransportRequestRespond, TestHttpsIPv6) {
   auto timeout = std::chrono::seconds(1);
   auto endpoint =
-      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 1);
+      siotrns::ip::tcp::create_endpoint(TEST_IPV6_ADDR, TEST_PORT_NUM + 5);
   auto srvr_cert = siotrns::ip::tls::Credentials{
       .ca_file = std::filesystem::path(CERTS_PATH) / "ca.crt",
       .cert_file = std::filesystem::path(CERTS_PATH) / "receiver.crt",
@@ -424,8 +470,6 @@ TEST_F(TestNetworkTransportRequestRespond, TestHttpsIPv6) {
 
   create_request(endpoint);
   test_fn_(client);
-  client.reset();  // Ensure client is reset after test
-  server.reset();  // Ensure server is reset after test
 }
 
 // NOLINTBEGIN [bugprone-exception-escape]

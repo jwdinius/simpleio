@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/log/trivial.hpp>
+#include <deque>
 #include <memory>
 #include <string>
 #include <utility>
@@ -21,7 +22,6 @@ boost::asio::ip::tcp::endpoint create_endpoint(const char* ip_address,
   return {boost::asio::ip::address::from_string(ip_address), port};
 }
 
-/*
 /// @brief Strategy for sending messages over TCP
 /// @details This class uses a TCP socket to send messages of type MessageT
 ///          to a specified remote endpoint.
@@ -33,91 +33,43 @@ class Sender : public simpleio::Sender<MessageT>,
   /// @brief Construct from a shared io_context and a remote endpoint.
   /// @param io_ctx, the shared io_context.
   /// @param remote_endpoint, the remote endpoint to send to.
+  /// @param framer, the framing strategy to use (default: DefaultFramer)
+  /// @param streaming, whether to enable streaming mode (default: false)
   explicit Sender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                  boost::asio::ip::tcp::endpoint remote_endpoint)
-      : socket_(*io_ctx),
-        remote_endpoint_(std::move(remote_endpoint)),
-        strand_(boost::asio::make_strand(*io_ctx)) {}
-
-  /// @brief Send a message.
-  /// @details This method connects to the remote endpoint and sends the message
-  ///          asynchronously.
-  /// @param msg, the message to send.
-  void send(MessageT const& msg) override {
-    connect();
-    auto self = this->shared_from_this();
-    auto const& blob = msg.blob();
-    boost::asio::async_write(
-        socket_, boost::asio::buffer(blob.data(), blob.size()),
-        boost::asio::bind_executor(
-            strand_,
-            [self](boost::system::error_code err_code, size_t bytes_sent) {
-              if (!err_code) {
-                BOOST_LOG_TRIVIAL(debug) << "Sent " << bytes_sent << " bytes "
-                                         << " to " << self->remote_endpoint_;
-              } else {
-                BOOST_LOG_TRIVIAL(error)
-                    << "Error sending data: " << err_code.message();
-              }
-            }));
-    socket_.close();
-  }
-
- private:
-  /// @brief Connect to the remote endpoint.
-  void connect() {
-    BOOST_LOG_TRIVIAL(debug) << "Connecting to " << remote_endpoint_;
-    boost::system::error_code err_code;
-    // TODO(jdinius): replace with async_connect
-    socket_.connect(remote_endpoint_, err_code);
-    if (!err_code) {
-      BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
-    } else {
-      BOOST_LOG_TRIVIAL(error) << "Failed to connect: " << err_code.message();
-    }
-    BOOST_LOG_TRIVIAL(debug) << "Connected to " << remote_endpoint_;
-  }
-
-  boost::asio::ip::tcp::socket socket_;
-  boost::asio::ip::tcp::endpoint remote_endpoint_;
-  boost::asio::strand<boost::asio::io_context::executor_type> strand_;
-};
-*/
-
-/// @brief Strategy for sending messages over TCP
-/// @details This class uses a TCP socket to send messages of type MessageT
-///          to a specified remote endpoint.
-/// @tparam MessageT, the type of message to send.
-template <typename MessageT>
-class Sender : public simpleio::Sender<MessageT>,
-               public std::enable_shared_from_this<Sender<MessageT>> {
- public:
-  /// @brief Construct from a shared io_context and a remote endpoint.
-  /// @param io_ctx, the shared io_context.
-  /// @param remote_endpoint, the remote endpoint to send to.
-  explicit Sender(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-                  boost::asio::ip::tcp::endpoint remote_endpoint)
+                  boost::asio::ip::tcp::endpoint remote_endpoint,
+                  std::shared_ptr<simpleio::Framer> framer =
+                      std::make_shared<simpleio::DefaultFramer>(),
+                  bool streaming = false)
       : io_ctx_(io_ctx),
         remote_endpoint_(std::move(remote_endpoint)),
-        strand_(boost::asio::make_strand(*io_ctx)) {}
+        strand_(boost::asio::make_strand(*io_ctx)),
+        streaming_session_(streaming ? std::make_shared<StreamingSession>(
+                                           io_ctx_, remote_endpoint_, strand_)
+                                     : nullptr),
+        framer_(std::move(framer)) {}
 
   /// @brief Send a message.
   /// @details This method creates a new session for each message.
   ///          Sessions connect and send the message asynchronously.
   /// @param msg, the message to send.
   void send(MessageT const& msg) override {
-    auto session = std::make_shared<Session>(io_ctx_, remote_endpoint_, strand_,
-                                             msg.blob());
+    if (streaming_session_) {
+      streaming_session_->enqueue(framer_->frame(msg.blob()));
+      return;
+    }
+    auto session = std::make_shared<OneShotSession>(
+        io_ctx_, remote_endpoint_, strand_, framer_->frame(msg.blob()));
     session->start();
   }
 
  private:
-  class Session : public std::enable_shared_from_this<Session> {
+  class OneShotSession : public std::enable_shared_from_this<OneShotSession> {
    public:
-    Session(std::shared_ptr<boost::asio::io_context> const& io_ctx,
-            boost::asio::ip::tcp::endpoint endpoint,
-            boost::asio::strand<boost::asio::io_context::executor_type> strand,
-            std::string blob)
+    OneShotSession(
+        std::shared_ptr<boost::asio::io_context> const& io_ctx,
+        boost::asio::ip::tcp::endpoint endpoint,
+        boost::asio::strand<boost::asio::io_context::executor_type> strand,
+        std::string blob)
         : socket_(*io_ctx),
           remote_endpoint_(std::move(endpoint)),
           strand_(std::move(strand)),
@@ -169,9 +121,129 @@ class Sender : public simpleio::Sender<MessageT>,
     std::string const blob_;
   };
 
+  // ---------------------- Persistent streaming session ----------------------
+  class StreamingSession
+      : public std::enable_shared_from_this<StreamingSession> {
+   public:
+    StreamingSession(
+        std::shared_ptr<boost::asio::io_context> const& io_ctx,
+        boost::asio::ip::tcp::endpoint endpoint,
+        boost::asio::strand<boost::asio::io_context::executor_type> strand)
+        : socket_(*io_ctx),
+          remote_endpoint_(std::move(endpoint)),
+          strand_(std::move(strand)) {}
+
+    ~StreamingSession() {
+      close();
+    }
+
+    void enqueue(std::string blob) {
+      auto self = this->shared_from_this();
+      boost::asio::dispatch(
+          strand_, [this, self, blob = std::move(blob)]() mutable {
+            queue_.emplace_back(std::move(blob));
+            if (!connected() && !connecting_) {
+              return connect();
+            }
+            if (connected()) {
+              return write();
+            }
+            BOOST_LOG_TRIVIAL(warning) << "enqueue fell through";
+          });
+    }
+
+    bool connected() {
+      return connected_ && socket_.is_open();
+    }
+
+    void close() {
+      boost::asio::dispatch(strand_, [this]() {
+        boost::system::error_code err_code;
+        if (socket_.is_open()) {
+          socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both,
+                           err_code);
+          socket_.close(err_code);
+        }
+        connected_ = false;
+        connecting_ = false;
+      });
+    }
+
+   private:
+    void connect() {
+      connecting_ = true;
+      auto self = this->shared_from_this();
+      socket_.async_connect(
+          remote_endpoint_,
+          boost::asio::bind_executor(
+              strand_, [this, self](boost::system::error_code err_code) {
+                connecting_ = false;
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "stream connect failed: " << err_code.message();
+                  // Leave queued data; next enqueue() will try again
+                  return;
+                }
+                connected_ = true;
+                BOOST_LOG_TRIVIAL(debug)
+                    << "stream connected to " << remote_endpoint_;
+                if (!queue_.empty()) {
+                  write();
+                }
+              }));
+    }
+
+    void write() {
+      if (queue_.empty() || !connected()) {
+        return;
+      }
+      auto self = this->shared_from_this();
+
+      // coalesce front message into a buffer; if you want to write multiple
+      // frames at once, you could gather-write here. For simplicity, one frame
+      // at a time:
+      auto current = std::move(queue_.front());
+      queue_.pop_front();
+
+      boost::asio::async_write(
+          socket_, boost::asio::buffer(current),
+          boost::asio::bind_executor(
+              strand_,
+              [this, self](boost::system::error_code err_code, std::size_t n) {
+                if (err_code) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "stream write failed: " << err_code.message();
+                  // Close the socket; queued messages remain. Next enqueue will
+                  // reconnect.
+                  boost::system::error_code ignore;
+                  socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both,
+                                   ignore);
+                  socket_.close(ignore);
+                  connected_ = false;
+                  return;
+                }
+                BOOST_LOG_TRIVIAL(debug)
+                    << "stream sent " << n << " bytes to " << remote_endpoint_;
+                if (!queue_.empty()) {
+                  write();
+                }
+              }));
+    }
+
+    boost::asio::ip::tcp::socket socket_;
+    boost::asio::ip::tcp::endpoint remote_endpoint_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+
+    std::deque<std::string> queue_;
+    bool connected_{false};
+    bool connecting_{false};
+  };
+
   std::shared_ptr<boost::asio::io_context> io_ctx_;
   boost::asio::ip::tcp::endpoint remote_endpoint_;
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+  std::shared_ptr<StreamingSession> streaming_session_;
+  std::shared_ptr<simpleio::Framer> framer_;
 };
 
 /// @brief Strategy for receiving messages over TCP
@@ -190,13 +262,17 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   ///                    received.
+  /// @param framer, the framing strategy to use for incoming messages (default:
+  /// DefaultFramer)
   explicit Receiver(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
-      typename simpleio::Receiver<MessageT>::callback_t message_cb)
+      typename simpleio::Receiver<MessageT>::callback_t message_cb,
+      std::shared_ptr<simpleio::Framer> framer)
       : acceptor_(*io_ctx, local_endpoint),
         strand_(boost::asio::make_strand(*io_ctx)),
-        simpleio::Receiver<MessageT>(std::move(message_cb)) {}
+        simpleio::Receiver<MessageT>(std::move(message_cb)),
+        framer_(std::move(framer)) {}
 
   /// @brief Factory function to create a tcp::Receiver.
   /// @details Constructs a receiver and starts accepting connections
@@ -204,13 +280,17 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   /// received.
+  /// @param framer, the framing strategy to use for incoming messages (default:
+  /// DefaultFramer)
   /// @return A shared pointer to an initialized tcp::Receiver.
   static std::shared_ptr<Receiver<MessageT>> create(
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
-      typename Receiver<MessageT>::callback_t message_cb) {
-    auto receiver = std::make_shared<Receiver<MessageT>>(io_ctx, local_endpoint,
-                                                         std::move(message_cb));
+      typename Receiver<MessageT>::callback_t message_cb,
+      std::shared_ptr<simpleio::Framer> framer =
+          std::make_shared<simpleio::DefaultFramer>()) {
+    auto receiver = std::make_shared<Receiver<MessageT>>(
+        io_ctx, local_endpoint, std::move(message_cb), std::move(framer));
     receiver->start_accepting();
     return receiver;
   }
@@ -267,30 +347,42 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param socket, a shared pointer to the socket to receive messages from.
   void start_receiving(
       std::shared_ptr<boost::asio::ip::tcp::socket> const& socket) {
-    auto buffer = std::make_shared<std::string>(MessageT::max_blob_size, '\0');
     auto self = this->shared_from_this();
-    boost::asio::async_read(
-        *socket, boost::asio::buffer(buffer->data(), buffer->size()),
-        boost::asio::bind_executor(
-            strand_, [self, buffer, socket](boost::system::error_code err_code,
-                                            size_t bytes_recvd) {
-              // We expect the client to close the connection after sending a
-              // message i.e., "Open-Squirt-Close" for the simplest case
-              if (err_code == boost::asio::error::eof && bytes_recvd > 0) {
+    auto buffer = std::make_shared<std::string>();
+    buffer->reserve(MessageT::max_blob_size);
+    auto read_buffer =
+        std::make_shared<std::string>(MessageT::max_blob_size, '\0');
+
+    auto do_read = std::make_shared<std::function<void()>>();
+    *do_read = [this, self, socket, buffer, read_buffer, do_read]() -> void {
+      socket->async_read_some(
+          boost::asio::buffer(*read_buffer),
+          boost::asio::bind_executor(
+              strand_,
+              [this, self, socket, buffer, read_buffer, do_read](
+                  boost::system::error_code err_code, std::size_t bytes_recvd) {
+                if (err_code && err_code != boost::asio::error::eof) {
+                  BOOST_LOG_TRIVIAL(error)
+                      << "Read failed: " << err_code.message();
+                  return;
+                }
                 BOOST_LOG_TRIVIAL(debug)
                     << "Received " << bytes_recvd << " bytes.";
-                buffer->resize(bytes_recvd);
-                self->on_read(MessageT(*buffer));
-                self->start_receiving(socket);
-              } else {
-                BOOST_LOG_TRIVIAL(error)
-                    << "Error receiving data: " << err_code.message();
-              }
-            }));
+                buffer->append(read_buffer->data(), bytes_recvd);
+                std::string msg;
+                while (framer_->try_unframe(*buffer, msg)) {
+                  self->on_read(MessageT(msg));
+                }
+                (*do_read)();  // recurse
+              }));
+    };
+
+    boost::asio::dispatch(strand_, [do_read]() { (*do_read)(); });
   }
 
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+  std::shared_ptr<simpleio::Framer> framer_;
 };
 
 }  // namespace simpleio::transports::ip::tcp

@@ -20,6 +20,21 @@
 
 namespace simpleio::transports::ip {
 
+static constexpr size_t UDP_BLOB_SIZE{1400};
+static constexpr size_t TCP_BLOB_SIZE{64000};
+
+template <typename EntityT>
+using TcpSerializer = Serializer<EntityT, TCP_BLOB_SIZE>;
+
+template <typename EntityT>
+using UdpSerializer = Serializer<EntityT, UDP_BLOB_SIZE>;
+
+template <typename EntityT>
+using TcpMessage = Message<TcpSerializer<EntityT>>;
+
+template <typename EntityT>
+using UdpMessage = Message<UdpSerializer<EntityT>>;
+
 /// @brief IO worker.
 /// @details An IoWorker sets up a shared task scheduler, lifecycle manager,
 ///          and callback executor for sending and receiving messages over

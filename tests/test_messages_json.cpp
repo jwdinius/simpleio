@@ -11,6 +11,7 @@
 
 namespace sio = simpleio;
 namespace siomsg = simpleio::messages;
+using JsonSerializer = siomsg::JsonSerializer<>;
 
 // Example test case using the test harness
 TEST(JsonMessageTest, TestPackUnpackNominal) {
@@ -19,15 +20,14 @@ TEST(JsonMessageTest, TestPackUnpackNominal) {
   json_obj["id"] = 1;
   json_obj["contents"] = "Hello, world!";
 
-  auto json_msg =
-      std::make_shared<sio::Message<siomsg::JsonSerializer>>(json_obj);
+  auto json_msg = std::make_shared<sio::Message<JsonSerializer>>(json_obj);
 
   // Copy the packed entity
   std::string serialized_json_msg{json_msg->blob()};
 
   // Create a new JsonMessage from the packed entity
   auto json_msg_from_serialized =
-      std::make_shared<sio::Message<siomsg::JsonSerializer>>(
+      std::make_shared<sio::Message<JsonSerializer>>(
           std::move(serialized_json_msg));
 
   // Verify the unpacked JSON object

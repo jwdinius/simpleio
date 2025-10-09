@@ -41,7 +41,8 @@ class Context {
           scheduler_,
           tcp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
           opts.framer, opts.streaming);
-    } else if (std::holds_alternative<TlsOptions>(options)) {
+    }
+    if (std::holds_alternative<TlsOptions>(options)) {
       auto const& opts = std::get<TlsOptions>(options);
       return std::make_shared<tls::Sender<MessageT>>(
           scheduler_,
@@ -49,24 +50,23 @@ class Context {
                                opts.tcp_options.endpoint.port),
           opts.credentials, opts.tcp_options.framer,
           opts.tcp_options.streaming);
-    } else {
-      auto const& opts = std::get<UdpOptions>(options);
-      if (opts.broadcast) {
-        return udp::Sender<MessageT>::create_broadcast(
-            scheduler_,
-            udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port));
-      }
-      if (opts.ttl.has_value()) {
-        return udp::Sender<MessageT>::create_multicast(
-            scheduler_,
-            udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
-            opts.ttl.value(), opts.loopback.value_or(false),
-            opts.interface_v6.value_or(0));
-      }
-      return udp::Sender<MessageT>::create_unicast(
+    }
+    auto const& opts = std::get<UdpOptions>(options);
+    if (opts.broadcast) {
+      return udp::Sender<MessageT>::create_broadcast(
           scheduler_,
           udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port));
     }
+    if (opts.ttl.has_value()) {
+      return udp::Sender<MessageT>::create_multicast(
+          scheduler_,
+          udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
+          opts.ttl.value(), opts.loopback.value_or(false),
+          opts.interface_v6.value_or(0));
+    }
+    return udp::Sender<MessageT>::create_unicast(
+        scheduler_,
+        udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port));
   }
 
   template <typename MessageT>
@@ -79,30 +79,30 @@ class Context {
           scheduler_,
           tcp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
           std::move(message_cb), opts.framer);
-    } else if (std::holds_alternative<TlsOptions>(options)) {
+    }
+    if (std::holds_alternative<TlsOptions>(options)) {
       auto const& opts = std::get<TlsOptions>(options);
       return tls::Receiver<MessageT>::create(
           scheduler_,
           tcp::create_endpoint(opts.tcp_options.endpoint.ip.c_str(),
                                opts.tcp_options.endpoint.port),
           std::move(message_cb), opts.credentials, opts.tcp_options.framer);
-    } else {
-      auto const& opts = std::get<UdpOptions>(options);
-      if (opts.broadcast) {
-        return udp::Receiver<MessageT>::create_broadcast(
-            scheduler_, opts.endpoint.port, std::move(message_cb));
-      }
-      if (opts.ttl.has_value()) {
-        return udp::Receiver<MessageT>::create_multicast(
-            scheduler_,
-            udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
-            std::move(message_cb), opts.interface_v6.value_or(0));
-      }
-      return udp::Receiver<MessageT>::create_unicast(
+    }
+    auto const& opts = std::get<UdpOptions>(options);
+    if (opts.broadcast) {
+      return udp::Receiver<MessageT>::create_broadcast(
+          scheduler_, opts.endpoint.port, std::move(message_cb));
+    }
+    if (opts.ttl.has_value()) {
+      return udp::Receiver<MessageT>::create_multicast(
           scheduler_,
           udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
-          std::move(message_cb));
+          std::move(message_cb), opts.interface_v6.value_or(0));
     }
+    return udp::Receiver<MessageT>::create_unicast(
+        scheduler_,
+        udp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
+        std::move(message_cb));
   }
 
   template <typename ServiceT>
@@ -114,14 +114,13 @@ class Context {
           scheduler_,
           tcp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
           opts.timeout);
-    } else {
-      auto const& opts = std::get<HttpsOptions>(options);
-      return std::make_shared<https::Client<ServiceT>>(
-          scheduler_,
-          tcp::create_endpoint(opts.http_options.endpoint.ip.c_str(),
-                               opts.http_options.endpoint.port),
-          opts.http_options.timeout, opts.credentials);
     }
+    auto const& opts = std::get<HttpsOptions>(options);
+    return std::make_shared<https::Client<ServiceT>>(
+        scheduler_,
+        tcp::create_endpoint(opts.http_options.endpoint.ip.c_str(),
+                             opts.http_options.endpoint.port),
+        opts.http_options.timeout, opts.credentials);
   }
 
   template <typename ServiceT>
@@ -134,14 +133,13 @@ class Context {
           scheduler_,
           tcp::create_endpoint(opts.endpoint.ip.c_str(), opts.endpoint.port),
           std::move(request_cb), opts.timeout);
-    } else {
-      auto const& opts = std::get<HttpsOptions>(options);
-      return https::Server<ServiceT>::create(
-          scheduler_,
-          tcp::create_endpoint(opts.http_options.endpoint.ip.c_str(),
-                               opts.http_options.endpoint.port),
-          std::move(request_cb), opts.http_options.timeout, opts.credentials);
     }
+    auto const& opts = std::get<HttpsOptions>(options);
+    return https::Server<ServiceT>::create(
+        scheduler_,
+        tcp::create_endpoint(opts.http_options.endpoint.ip.c_str(),
+                             opts.http_options.endpoint.port),
+        std::move(request_cb), opts.http_options.timeout, opts.credentials);
   }
 
  private:

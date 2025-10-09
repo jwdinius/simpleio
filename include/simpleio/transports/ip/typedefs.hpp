@@ -37,8 +37,8 @@ struct TlsCredentials {
 };
 
 struct Endpoint {
-  std::string ip{"127.0.0.1"};
-  uint16_t port{5555};
+  std::string ip;
+  uint16_t port;
 };
 
 struct TcpOptions {
@@ -65,7 +65,7 @@ using Options = std::variant<TcpOptions, TlsOptions, UdpOptions>;
 
 struct HttpOptions {
   Endpoint endpoint;
-  std::chrono::duration<int> timeout{5};
+  std::chrono::duration<int> timeout;
 };
 
 struct HttpsOptions {

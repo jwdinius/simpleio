@@ -254,8 +254,9 @@ class ServerSession
   }
 
   void set_close_handler(
-      std::function<void(std::shared_ptr<ServerSession<ServiceT>>)> cb) {
-    on_close_ = std::move(cb);
+      std::function<void(std::shared_ptr<ServerSession<ServiceT>>)>
+          close_handler_cb) {
+    on_close_ = std::move(close_handler_cb);
   }
 
  private:
@@ -454,9 +455,7 @@ class Server : public simpleio::Server<ServiceT>,
     }
 
     while (!sessions_.empty()) {
-      auto it = sessions_.begin();
-      auto s = *it;
-      sessions_.erase(it);
+      sessions_.erase(sessions_.begin());
     }
   }
 
@@ -487,13 +486,15 @@ class Server : public simpleio::Server<ServiceT>,
     BOOST_LOG_TRIVIAL(debug) << "https::Server accepted a connection.";
     auto session = std::make_shared<ServerSession<ServiceT>>(
         self->request_cb_, self->timeout_, std::move(socket), self->ssl_ctx_);
-    session->set_close_handler([weak = std::weak_ptr{self}](
-                                   std::shared_ptr<ServerSession<ServiceT>> s) {
-      if (auto owner = weak.lock()) {
-        boost::asio::dispatch(owner->strand_,
-                              [owner, s] { owner->sessions_.erase(s); });
-      }
-    });
+    session->set_close_handler(
+        [weak = std::weak_ptr{self}](
+            std::shared_ptr<ServerSession<ServiceT>> session) {
+          if (auto owner = weak.lock()) {
+            boost::asio::dispatch(owner->strand_, [owner, session] {
+              owner->sessions_.erase(session);
+            });
+          }
+        });
     self->sessions_.insert(session);
     session->run();
     self->start_accepting();

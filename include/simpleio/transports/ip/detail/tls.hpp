@@ -171,10 +171,10 @@ class Sender : public simpleio::Sender<MessageT>,
           strand_(std::move(strand)) {}
 
     ~StreamingSession() {
-      boost::system::error_code ec;
+      boost::system::error_code err_code;
       socket_.lowest_layer().shutdown(
-          boost::asio::ip::tcp::socket::shutdown_both, ec);
-      socket_.lowest_layer().close(ec);
+          boost::asio::ip::tcp::socket::shutdown_both, err_code);
+      socket_.lowest_layer().close(err_code);
       connected_ = false;
       connecting_ = false;
       queue_.clear();

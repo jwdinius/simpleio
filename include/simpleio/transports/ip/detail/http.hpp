@@ -4,11 +4,9 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ssl.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
-#include <boost/beast/ssl/ssl_stream.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/log/trivial.hpp>
 #include <functional>
@@ -17,56 +15,46 @@
 #include <utility>
 
 #include "simpleio/transport.hpp"
-#include "simpleio/transports/ip/http.hpp"
-#include "simpleio/transports/ip/tls.hpp"
 
-namespace simpleio::transports::ip::https {
+namespace simpleio::transports::ip::http {
 
-/// @brief HTTPS client for sending requests and receiving responses
+/// @brief Logs an error message with the provided error code and description.
+/// @details This function is shared between HTTP and HTTPS clients and servers.
+/// @param err_code, the error code to log.
+/// @param what, a description of the error to log.
+inline void fail(boost::beast::error_code err_code, char const* what) {
+  BOOST_LOG_TRIVIAL(error) << what << ": " << err_code.message();
+}
+
+/// @brief HTTP client for sending requests and receiving responses
 /// asynchronously.
-/// @details This class uses Boost Beast to securely send HTTP requests and
-/// receive
-///          HTTP responses of a templated service type using TLS v1.3.
+/// @details This class uses Boost Beast to send HTTP requests and receive
+///          HTTP responses of a templated service type. This class is inspired
+///          by the Boost Beast Github example for async HTTP clients.
 /// @tparam ServiceT, the service type
 template <typename ServiceT>
 class Client : public simpleio::Client<ServiceT>,
                public std::enable_shared_from_this<Client<ServiceT>> {
  public:
-  /// @brief Constructor that initializes the HTTPS client with a shared
+  /// @brief Constructor that initializes the HTTP client with a shared
   /// io_context,
-  ///          a TLS configuration, a remote endpoint, and a timeout
-  ///          duration.
+  ///          a remote endpoint, and a timeout duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param remote_endpoint, the remote endpoint to connect to.
-  /// @param timeout, the timeout duration for operations.
-  /// @param config, Credentials to use for secure connections.
+  /// @param timeout, the timeout duration for operations (in seconds).
   explicit Client(std::shared_ptr<boost::asio::io_context> ioc,
                   boost::asio::ip::tcp::endpoint remote_endpoint,
-                  std::chrono::duration<int> timeout,
-                  tls::Credentials const& config)
+                  std::chrono::duration<int> timeout)
       : io_ctx_(std::move(ioc)),
         remote_endpoint_(std::move(remote_endpoint)),
-        ssl_ctx_(boost::asio::ssl::context::tlsv13),
-        stream_(*io_ctx_, ssl_ctx_),
+        stream_(boost::asio::make_strand(*io_ctx_)),
         timeout_(timeout),
-        simpleio::Client<ServiceT>() {
-    try {
-      ssl_ctx_.load_verify_file(config.ca_file.string());
-      ssl_ctx_.use_certificate_chain_file(config.cert_file.string());
-      ssl_ctx_.use_private_key_file(config.key_file.string(),
-                                    boost::asio::ssl::context::pem);
-    } catch (std::exception const& e) {
-      std::ostringstream err;
-      err << "TLSv1.3 setup failed: " << e.what();
-      BOOST_LOG_TRIVIAL(error) << err.str();
-      throw TransportException(err.str());
-    }
-  }
+        simpleio::Client<ServiceT>() {}
 
-  /// @brief Asynchronously sends a secure request and returns a future for the
+  /// @brief Asynchronously sends a request and returns a future for the
   /// response.
-  /// @details This function securely sends an HTTP request and returns a future
-  /// that will
+  /// @details This function sends an HTTP request and returns a future that
+  /// will
   ///          hold the response once it is received. The request is sent using
   ///          Boost Beast's asynchronous operations.
   /// @param req, the request to send, which is of type ServiceT::RequestT.
@@ -74,92 +62,76 @@ class Client : public simpleio::Client<ServiceT>,
   ///          the response once it is received.
   std::future<typename ServiceT::ResponseT> send_request_async(
       typename ServiceT::RequestT const& req) override {
-    req_ = req.entity();
-    promise_ = std::make_shared<std::promise<typename ServiceT::ResponseT>>();
-    connect();
-    return promise_->get_future();
+    auto self = this->shared_from_this();
+    self->req_ = req.entity();
+    self->promise_ =
+        std::make_shared<std::promise<typename ServiceT::ResponseT>>();
+    self->connect();
+    return self->promise_->get_future();
   }
 
-  /// @brief Synchronously sends a secure request and returns a response.
+  /// @brief Synchronously sends a request and returns a response.
   /// @param req, the request to send, which is of type ServiceT::RequestT.
   /// @return typename ServiceT::ResponseT, the response.
   typename ServiceT::ResponseT send_request(
       typename ServiceT::RequestT const& req) override {
-    auto future = send_request_async(req);
+    auto self = this->shared_from_this();
+    auto future = self->send_request_async(req);
     // Wait for the future to complete and return the response
     if (!future.valid()) {
       throw TransportException(
-          "Failed to get a valid response from the https::Client.");
+          "Failed to get a valid response from the http::Client.");
     }
     return future.get();
   }
 
  private:
-  /// @brief Connects to the remote endpoint.
+  /// @brief Connects to the remote endpoint and starts the asynchronous
+  /// request.
   void connect() {
-    BOOST_LOG_TRIVIAL(debug) << "https::Client connecting.";
-    // Reset the stream
-    stream_ =
-        boost::beast::ssl_stream<boost::beast::tcp_stream>(*io_ctx_, ssl_ctx_);
-    stream_.next_layer().expires_after(timeout_);
-    stream_.next_layer().async_connect(
-        remote_endpoint_,
-        boost::beast::bind_front_handler(&Client<ServiceT>::start_handshake,
-                                         this->shared_from_this()));
-  }
+    auto self = this->shared_from_this();
+    BOOST_LOG_TRIVIAL(debug) << "http::Client connecting.";
 
-  /// @brief Starts the TLS handshake after a successful connection.
-  void start_handshake(boost::beast::error_code err_code) {
-    if (err_code) {
-      return http::fail(err_code, "Connection failed.");
-    }
-    BOOST_LOG_TRIVIAL(debug)
-        << "https::Client connected, starting TLS handshake.";
-
-    // Set a timeout on the operation
-    stream_.next_layer().expires_after(timeout_);
-
-    // Perform the TLS handshake
-    stream_.async_handshake(
-        boost::asio::ssl::stream_base::client,
-        boost::beast::bind_front_handler(&Client<ServiceT>::write_request,
-                                         this->shared_from_this()));
+    self->stream_.expires_after(self->timeout_);
+    self->stream_.async_connect(self->remote_endpoint_,
+                                boost::beast::bind_front_handler(
+                                    &Client<ServiceT>::write_request, self));
   }
 
   /// @brief Writes the request to the remote endpoint after a successful
-  /// handshake.
+  /// connection.
   void write_request(boost::beast::error_code err_code) {
+    auto self = this->shared_from_this();
     if (err_code) {
-      return http::fail(err_code, "Connection failed.");
+      return fail(err_code, "Connection failed.");
     }
-    BOOST_LOG_TRIVIAL(debug)
-        << "https::Client handshake completed, sending request.";
+    BOOST_LOG_TRIVIAL(debug) << "http::Client connected, sending request.";
 
     // Set a timeout on the operation
-    stream_.next_layer().expires_after(timeout_);
+    self->stream_.expires_after(self->timeout_);
 
     // Send the HTTP request to the remote host
     boost::beast::http::async_write(
-        stream_, req_,
+        self->stream_, self->req_,
         boost::beast::bind_front_handler(&Client<ServiceT>::await_response,
-                                         this->shared_from_this()));
+                                         self));
   }
 
   /// @brief Awaits the response after sending the request.
   void await_response(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    auto self = this->shared_from_this();
     if (err_code) {
-      return http::fail(err_code, "Failed to send request.");
+      return fail(err_code, "Failed to send request.");
     }
-    BOOST_LOG_TRIVIAL(debug)
-        << "https::Client sent request, awaiting response.";
+    BOOST_LOG_TRIVIAL(debug) << "http::Client sent request, awaiting response.";
 
     // Receive the HTTP response
     boost::beast::http::async_read(
-        stream_, buffer_, res_,
+        self->stream_, self->buffer_, self->res_,
         boost::beast::bind_front_handler(&Client<ServiceT>::handle_response,
-                                         this->shared_from_this()));
+                                         self));
   }
 
   /// @brief Handles the response received from the remote endpoint after it has
@@ -169,30 +141,33 @@ class Client : public simpleio::Client<ServiceT>,
   void handle_response(boost::beast::error_code err_code,
                        std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
-    if (err_code) {
-      return http::fail(err_code, "Failed to read response.");
-    }
-    BOOST_LOG_TRIVIAL(debug) << "https::Client received response.";
-
-    promise_->set_value(typename ServiceT::ResponseT(std::move(res_)));
-
     auto self = this->shared_from_this();
-    stream_.async_shutdown([self](boost::beast::error_code err_code) mutable {
-      BOOST_LOG_TRIVIAL(debug)
-          << "https::Client handled response, closing connection.";
-      if (err_code && err_code != boost::asio::error::eof) {
-        BOOST_LOG_TRIVIAL(error)
-            << "https::Client TLS shutdown failed: " << err_code.message();
-      }
-    });
+    if (err_code) {
+      return fail(err_code, "Failed to read response.");
+    }
+    BOOST_LOG_TRIVIAL(debug) << "http::Client received response.";
+
+    self->promise_->set_value(
+        typename ServiceT::ResponseT(std::move(self->res_)));
+
+    // Gracefully close the socket
+    self->stream_.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_both,
+                                    err_code);
+    self->stream_.socket().close();
+
+    // not_connected happens sometimes so don't bother reporting it.
+    if (err_code && err_code != boost::beast::errc::not_connected) {
+      return fail(err_code, "Failed to close connection.");
+    }
+
     // If we get here then the connection is closed gracefully
+    BOOST_LOG_TRIVIAL(debug) << "http::Client closed connection.";
   }
 
   std::shared_ptr<boost::asio::io_context> io_ctx_;
-  boost::asio::ssl::context ssl_ctx_;
   boost::asio::ip::tcp::endpoint remote_endpoint_;
   std::chrono::duration<int> timeout_;
-  boost::beast::ssl_stream<boost::beast::tcp_stream> stream_;
+  boost::beast::tcp_stream stream_;
   boost::beast::flat_buffer buffer_;  // (Must persist between reads)
   typename ServiceT::RequestT::entity_t req_;
   std::shared_ptr<std::promise<typename ServiceT::ResponseT>> promise_;
@@ -200,10 +175,8 @@ class Client : public simpleio::Client<ServiceT>,
 };
 
 /// @brief  HTTP server session for handling incoming requests and sending
-/// responses
-///         securely.
-/// @details Each request is handled securely in its own session, allowing for
-/// concurrent
+/// responses.
+/// @details Each request is handled in its own session, allowing for concurrent
 ///          processing of multiple requests. This class is inspired by the
 ///          Boost Beast Github example for async HTTP servers.
 /// @tparam ServiceT, the service type
@@ -213,39 +186,33 @@ class ServerSession
  public:
   /// @brief Constructor that initializes the asynchronous HTTP server session
   /// with a request
-  ///          callback, a timeout duration, a TCP socket, and an SSL
-  ///          context.
+  ///          callback, a timeout duration, and a socket.
   /// @param request_cb, the callback function to handle incoming requests.
   /// @param timeout, the timeout duration for operations.
   /// @param socket, the socket to use for the session.
-  /// @param ssl_ctx, the shared pointer to the SSL context for secure
-  /// connections.
   explicit ServerSession(
-      typename Server<ServiceT>::request_callback_t request_cb,
-      std::chrono::duration<int> timeout, boost::asio::ip::tcp::socket&& socket,
-      std::shared_ptr<boost::asio::ssl::context> const& ssl_ctx)
+      typename simpleio::Server<ServiceT>::request_callback_t request_cb,
+      std::chrono::duration<int> timeout, boost::asio::ip::tcp::socket&& socket)
       : request_cb_(request_cb),
         timeout_(timeout),
-        stream_(std::move(socket), *ssl_ctx) {}
+        stream_(std::move(socket)) {}
 
-  /// @brief Starts the session by initiating the TLS handshake.
+  /// @brief Starts the session by awaiting the request.
   void run() {
-    stream_.async_handshake(
-        boost::asio::ssl::stream_base::server,
+    boost::asio::dispatch(
+        stream_.get_executor(),
         boost::beast::bind_front_handler(
             &ServerSession<ServiceT>::await_request, this->shared_from_this()));
   }
 
  private:
-  /// @brief Awaits an incoming request from the client the TLS handshake.
-  void await_request(boost::beast::error_code err_code) {
-    if (err_code) {
-      return http::fail(err_code, "handshake");
-    }
+  /// @brief Awaits an incoming request from the client after session is
+  /// started.
+  void await_request() {
     BOOST_LOG_TRIVIAL(debug)
-        << "https::ServerSession running, awaiting request.";
+        << "http::ServerSession running, awaiting request.";
     req_ = {};
-    stream_.next_layer().expires_after(timeout_);
+    stream_.expires_after(timeout_);
     boost::beast::http::async_read(stream_, buffer_, req_,
                                    boost::beast::bind_front_handler(
                                        &ServerSession<ServiceT>::handle_request,
@@ -260,10 +227,10 @@ class ServerSession
       return close();
     }
     if (err_code) {
-      return http::fail(err_code, "read");
+      return fail(err_code, "read");
     }
     BOOST_LOG_TRIVIAL(debug)
-        << "https::ServerSession received request and is handling it.";
+        << "ServerSession received request and is handling it.";
 
     auto self = this->shared_from_this();
     boost::asio::dispatch(self->stream_.get_executor(), [self]() mutable {
@@ -284,41 +251,36 @@ class ServerSession
                 std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
     if (err_code) {
-      return http::fail(err_code, "write");
+      return fail(err_code, "write");
     }
     BOOST_LOG_TRIVIAL(debug)
-        << "https::ServerSession handled request and sent response.";
+        << "ServerSession handled request and sent response.";
 
     if (_close) {
       return close();
     }
 
-    await_request(err_code);
+    await_request();
   }
 
   /// @brief Closes the session gracefully after handling the request.
   void close() {
-    auto self = this->shared_from_this();
-    stream_.async_shutdown([self](boost::beast::error_code err_code) mutable {
-      BOOST_LOG_TRIVIAL(debug) << "https::ServerSession closing connection.";
-      if (err_code && err_code != boost::asio::error::eof) {
-        BOOST_LOG_TRIVIAL(error) << "https::ServerSession TLS shutdown failed: "
-                                 << err_code.message();
-      }
-    });
+    BOOST_LOG_TRIVIAL(debug) << "ServerSession closing connection.";
+    boost::beast::error_code err_code;
+    stream_.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_send,
+                              err_code);
   }
 
   typename simpleio::Server<ServiceT>::request_callback_t request_cb_;
   std::chrono::duration<int> timeout_;
-  boost::beast::ssl_stream<boost::beast::tcp_stream> stream_;
+  boost::beast::tcp_stream stream_;
   boost::beast::flat_buffer buffer_;  // (Must persist between reads)
   typename ServiceT::RequestT::entity_t req_;
   typename ServiceT::ResponseT::entity_t res_;
 };
 
-/// @brief Server class for accepting incoming HTTP connections and
-/// handling requests
-///        securely.
+/// @brief http::Server class for accepting incoming HTTP connections and
+/// handling requests.
 /// @details This class uses Boost Beast to accept incoming HTTP connections and
 ///          handle requests using a templated service type. It is designed to
 ///          run asynchronously and can handle multiple connections
@@ -328,39 +290,25 @@ template <typename ServiceT>
 class Server : public simpleio::Server<ServiceT>,
                public std::enable_shared_from_this<Server<ServiceT>> {
  public:
-  /// @brief Constructor that initializes the HTTPS server with a shared
+  /// @brief Constructor that initializes the HTTP server with a shared
   /// io_context,
-  ///        a TLS configuration, a local endpoint, a request callback, a
-  ///        worker, and a timeout duration.
+  ///          a local endpoint, a request callback, and a timeout
+  ///          duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param local_endpoint, the local endpoint to bind the server to.
   /// @param request_cb, the callback function to handle incoming requests.
   /// @param timeout, the timeout duration for operations.
-  /// @param config, Credentials to use for secure connections.
   Server(
       std::shared_ptr<boost::asio::io_context> ioc,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       std::function<typename ServiceT::ResponseT(typename ServiceT::RequestT)>
           request_cb,
-      std::chrono::duration<int> timeout, tls::Credentials const& config)
+      std::chrono::duration<int> timeout)
       : ioc_(std::move(ioc)),
-        ssl_ctx_(std::make_shared<boost::asio::ssl::context>(
-            boost::asio::ssl::context::tlsv13)),
         acceptor_(*ioc_),
         timeout_(timeout),
         strand_(boost::asio::make_strand(*ioc_)),
         simpleio::Server<ServiceT>(std::move(request_cb)) {
-    try {
-      ssl_ctx_->load_verify_file(config.ca_file.string());
-      ssl_ctx_->use_certificate_chain_file(config.cert_file.string());
-      ssl_ctx_->use_private_key_file(config.key_file.string(),
-                                     boost::asio::ssl::context::pem);
-    } catch (std::exception const& e) {
-      std::ostringstream error_stream;
-      error_stream << "Error setting up TLSv1.3 context: " << e.what();
-      BOOST_LOG_TRIVIAL(error) << error_stream.str();
-      throw std::runtime_error(error_stream.str());
-    }
     boost::beast::error_code err_code;
     acceptor_.open(local_endpoint.protocol(), err_code);
 
@@ -376,7 +324,6 @@ class Server : public simpleio::Server<ServiceT>,
 
     acceptor_.bind(local_endpoint, err_code);
     if (err_code) {
-      BOOST_LOG_TRIVIAL(error) << "bind failed: " << err_code.message();
       throw TransportException("bind");
     }
 
@@ -387,46 +334,45 @@ class Server : public simpleio::Server<ServiceT>,
     }
   }
 
-  /// @brief Factory function that creates a fully initialized HTTPS server with
+  /// @brief Factory function that creates a fully initialized HTTP server with
   /// a shared io_context,
-  ///          a local endpoint, a request callback, a timeout
-  ///          duration, and TLS credentials
+  ///          a local endpoint, a request callback, and a timeout
+  ///          duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param local_endpoint, the local endpoint to bind the server to.
   /// @param request_cb, the callback function to handle incoming requests.
   /// @param timeout, the timeout duration for operations.
-  /// @param config, Credentials to use for secure connections.
-  /// @return shared pointer to the created https::Server
+  /// @return shared pointer to the created http::Server
   static std::shared_ptr<Server<ServiceT>> create(
       std::shared_ptr<boost::asio::io_context> ioc,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       std::function<typename ServiceT::ResponseT(typename ServiceT::RequestT)>
           request_cb,
-      std::chrono::duration<int> timeout, tls::Credentials config) {
+      std::chrono::duration<int> timeout) {
     auto server = std::make_shared<Server<ServiceT>>(
-        ioc, local_endpoint, std::move(request_cb), timeout, config);
+        ioc, local_endpoint, std::move(request_cb), timeout);
     server->start();
     return server;
   }
 
   /// @brief Destructor that closes the acceptor and logs the shutdown.
   /// @details This destructor ensures that the acceptor is closed gracefully
-  ///          when the https::Server object is destroyed, preventing any
-  ///          further incoming connections.
+  ///          when the http::Server object is destroyed, preventing any further
+  ///          incoming connections.
   ~Server() {
-    BOOST_LOG_TRIVIAL(debug) << "https::Server shutting down.";
+    BOOST_LOG_TRIVIAL(debug) << "http::Server shutting down.";
     boost::beast::error_code err_code;
     acceptor_.cancel(err_code);
     acceptor_.close(err_code);
     if (err_code) {
       BOOST_LOG_TRIVIAL(error)
-          << "https::Server failed to close acceptor: " << err_code.message();
+          << "http::Server failed to close acceptor: " << err_code.message();
     }
   }
 
-  /// @brief Starts the HTTPS server and begins accepting incoming connections.
+  /// @brief Starts the HTTP server and begins accepting incoming connections.
   void start() {
-    BOOST_LOG_TRIVIAL(debug) << "https::Server starting.";
+    BOOST_LOG_TRIVIAL(debug) << "http::Server starting.";
     start_accepting();
   }
 
@@ -434,22 +380,23 @@ class Server : public simpleio::Server<ServiceT>,
   /// @brief Starts accepting incoming connections asynchronously.
   void start_accepting() {
     BOOST_LOG_TRIVIAL(debug)
-        << "https::Server started, start accepting connections.";
+        << "http::Server started, start accepting connections.";
     acceptor_.async_accept(boost::asio::bind_executor(
         strand_, boost::beast::bind_front_handler(&Server<ServiceT>::accept,
                                                   this->shared_from_this())));
   }
 
-  /// @brief Start the HTTPS Server session after connecting the socket.
+  /// @brief Accepts an incoming connection and starts a new session to handle
+  /// it.
   void accept(boost::beast::error_code err_code,
               boost::asio::ip::tcp::socket socket) {
     if (err_code) {
-      return http::fail(err_code, "accept");
+      return fail(err_code, "accept");
     }
-    BOOST_LOG_TRIVIAL(debug) << "https::Server accepted a connection.";
+    BOOST_LOG_TRIVIAL(debug) << "http::Server accepted a connection.";
 
     std::make_shared<ServerSession<ServiceT>>(this->request_cb_, timeout_,
-                                              std::move(socket), ssl_ctx_)
+                                              std::move(socket))
         ->run();
 
     start_accepting();
@@ -457,8 +404,7 @@ class Server : public simpleio::Server<ServiceT>,
 
   std::shared_ptr<boost::asio::io_context> ioc_;
   boost::asio::ip::tcp::acceptor acceptor_;
-  std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
   std::chrono::duration<int> timeout_;
   boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 };
-}  // namespace simpleio::transports::ip::https
+}  // namespace simpleio::transports::ip::http

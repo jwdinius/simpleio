@@ -49,12 +49,13 @@ target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
-      simpleio/transports/ip/http.hpp
-      simpleio/transports/ip/https.hpp
+      simpleio/transports/ip/detail/ip.hpp
+      simpleio/transports/ip/detail/http.hpp
+      simpleio/transports/ip/detail/https.hpp
+      simpleio/transports/ip/detail/tcp.hpp
+      simpleio/transports/ip/detail/tls.hpp
+      simpleio/transports/ip/detail/udp.hpp
       simpleio/transports/ip/ip.hpp
-      simpleio/transports/ip/tcp.hpp
-      simpleio/transports/ip/tls.hpp
-      simpleio/transports/ip/udp.hpp
 )
 
 target_link_libraries(transports_ip

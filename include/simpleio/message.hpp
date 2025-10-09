@@ -52,6 +52,46 @@ class Serializer {
   virtual entity_t deserialize(std::string const& blob) = 0;
 };
 
+/// @brief Interface for encoding and decoding framed messages.
+class Framer {
+ public:
+  virtual ~Framer() = default;
+
+  /// @brief Prepare a raw message for transmission.
+  /// @param entity_blob The entity blob to encode.
+  /// @return A framed string to send over the wire.
+  [[nodiscard]] virtual std::string frame(
+      std::string const& entity_blob) const = 0;
+
+  /// @brief Try to unframe a complete message from the buffer.
+  /// @param buffer The buffer holding potentially partial or multiple messages.
+  /// @param entity_blob Output decoded message if one complete message is
+  /// found.
+  /// @return true if a message was extracted, false otherwise.
+  virtual bool try_unframe(std::string& buffer,
+                           std::string& entity_blob) const = 0;
+};
+
+/// @brief default framer
+/// @details This framer does not perform any framing or deframing.
+class DefaultFramer : public Framer {
+ public:
+  [[nodiscard]] std::string frame(
+      std::string const& entity_blob) const override {
+    return entity_blob;
+  }
+
+  bool try_unframe(std::string& buffer,
+                   std::string& entity_blob) const override {
+    if (buffer.empty()) {
+      return false;
+    }
+    entity_blob = buffer;
+    buffer.clear();
+    return true;
+  }
+};
+
 /// @brief A message class encapsulating a data structure of type T and its
 /// serialization strategy.
 /// @details Constructors of this class rely on dependency injection of a

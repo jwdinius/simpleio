@@ -57,3 +57,13 @@ detail::Context::~Context() {
   }
   BOOST_LOG_TRIVIAL(debug) << "Stopped io_context threads";
 }
+
+Context::Context() : impl_(std::make_unique<detail::Context>()) {}
+
+Context::Context(uint8_t num_threads)
+    : impl_(std::make_unique<detail::Context>(num_threads)) {}
+
+/// @brief Destructor.
+Context::~Context() {
+  impl_.reset();
+}

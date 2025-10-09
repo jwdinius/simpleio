@@ -14,12 +14,7 @@
 #include "simpleio/message.hpp"
 #include "simpleio/transport.hpp"
 #include "simpleio/transports/ip/detail/ip.hpp"
-#include "simpleio/transports/ip/http.hpp"
-#include "simpleio/transports/ip/https.hpp"
-#include "simpleio/transports/ip/tcp.hpp"
-#include "simpleio/transports/ip/tls.hpp"
 #include "simpleio/transports/ip/typedefs.hpp"
-#include "simpleio/transports/ip/udp.hpp"
 
 namespace simpleio::transports::ip {
 
@@ -31,16 +26,13 @@ class Context {
  public:
   /// @brief Default constructor
   /// @details Creates an io context running on a single thread
-  Context() : impl_(std::make_unique<detail::Context>()) {}
+  Context();
 
   /// @brief Constructor specifying number of threads for io context
-  explicit Context(uint8_t num_threads)
-      : impl_(std::make_unique<detail::Context>(num_threads)) {}
+  explicit Context(uint8_t num_threads);
 
   /// @brief Destructor.
-  ~Context() {
-    impl_.reset();
-  }
+  ~Context();
 
   template <typename MessageT>
   std::shared_ptr<simpleio::Sender<MessageT>> create_sender(

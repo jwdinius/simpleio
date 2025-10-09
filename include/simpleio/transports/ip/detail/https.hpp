@@ -18,8 +18,8 @@
 #include <utility>
 
 #include "simpleio/transport.hpp"
-#include "simpleio/transports/ip/http.hpp"
-#include "simpleio/transports/ip/tls.hpp"
+#include "simpleio/transports/ip/detail/http.hpp"
+#include "simpleio/transports/ip/detail/tls.hpp"
 #include "simpleio/transports/ip/typedefs.hpp"
 
 namespace simpleio::transports::ip::https {

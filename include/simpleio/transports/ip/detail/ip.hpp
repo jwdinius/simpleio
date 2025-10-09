@@ -11,12 +11,12 @@
 
 #include "simpleio/message.hpp"
 #include "simpleio/transport.hpp"
-#include "simpleio/transports/ip/http.hpp"
-#include "simpleio/transports/ip/https.hpp"
-#include "simpleio/transports/ip/tcp.hpp"
-#include "simpleio/transports/ip/tls.hpp"
+#include "simpleio/transports/ip/detail/http.hpp"
+#include "simpleio/transports/ip/detail/https.hpp"
+#include "simpleio/transports/ip/detail/tcp.hpp"
+#include "simpleio/transports/ip/detail/tls.hpp"
+#include "simpleio/transports/ip/detail/udp.hpp"
 #include "simpleio/transports/ip/typedefs.hpp"
-#include "simpleio/transports/ip/udp.hpp"
 
 namespace simpleio::transports::ip::detail {
 

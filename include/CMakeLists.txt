@@ -49,6 +49,7 @@ target_sources(transports_ip
   PUBLIC
     FILE_SET HEADERS
     FILES
+      simpleio/transports/ip/detail/ip.hpp
       simpleio/transports/ip/http.hpp
       simpleio/transports/ip/https.hpp
       simpleio/transports/ip/ip.hpp

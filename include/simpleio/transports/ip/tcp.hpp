@@ -78,9 +78,9 @@ class Sender : public simpleio::Sender<MessageT>,
     void start() {
       auto self = this->shared_from_this();
       socket_.async_connect(
-          remote_endpoint_,
+          self->remote_endpoint_,
           boost::asio::bind_executor(
-              strand_, [self](boost::system::error_code err_code) {
+              self->strand_, [self](boost::system::error_code err_code) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "Failed to connect: " << err_code.message();
@@ -96,10 +96,10 @@ class Sender : public simpleio::Sender<MessageT>,
     void write() {
       auto self = this->shared_from_this();
       boost::asio::async_write(
-          socket_, boost::asio::buffer(blob_.data(), blob_.size()),
+          self->socket_, boost::asio::buffer(blob_.data(), blob_.size()),
           boost::asio::bind_executor(
-              strand_, [self](boost::system::error_code err_code,
-                              std::size_t bytes_sent) {
+              self->strand_, [self](boost::system::error_code err_code,
+                                    std::size_t bytes_sent) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "Write failed: " << err_code.message();
@@ -140,13 +140,13 @@ class Sender : public simpleio::Sender<MessageT>,
     void enqueue(std::string blob) {
       auto self = this->shared_from_this();
       boost::asio::dispatch(
-          strand_, [this, self, blob = std::move(blob)]() mutable {
-            queue_.emplace_back(std::move(blob));
-            if (!connected() && !connecting_) {
-              return connect();
+          self->strand_, [self, blob = std::move(blob)]() mutable {
+            self->queue_.emplace_back(std::move(blob));
+            if (!self->connected() && !self->connecting_) {
+              return self->connect();
             }
-            if (connected()) {
-              return write();
+            if (self->connected()) {
+              return self->write();
             }
             BOOST_LOG_TRIVIAL(warning) << "enqueue fell through";
           });
@@ -173,59 +173,59 @@ class Sender : public simpleio::Sender<MessageT>,
     void connect() {
       connecting_ = true;
       auto self = this->shared_from_this();
-      socket_.async_connect(
-          remote_endpoint_,
+      self->socket_.async_connect(
+          self->remote_endpoint_,
           boost::asio::bind_executor(
-              strand_, [this, self](boost::system::error_code err_code) {
-                connecting_ = false;
+              self->strand_, [self](boost::system::error_code err_code) {
+                self->connecting_ = false;
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "stream connect failed: " << err_code.message();
                   // Leave queued data; next enqueue() will try again
                   return;
                 }
-                connected_ = true;
+                self->connected_ = true;
                 BOOST_LOG_TRIVIAL(debug)
-                    << "stream connected to " << remote_endpoint_;
-                if (!queue_.empty()) {
-                  write();
+                    << "stream connected to " << self->remote_endpoint_;
+                if (!self->queue_.empty()) {
+                  self->write();
                 }
               }));
     }
 
     void write() {
-      if (queue_.empty() || !connected()) {
+      auto self = this->shared_from_this();
+      if (self->queue_.empty() || !self->connected()) {
         return;
       }
-      auto self = this->shared_from_this();
 
       // coalesce front message into a buffer; if you want to write multiple
       // frames at once, you could gather-write here. For simplicity, one frame
       // at a time:
-      auto current = std::move(queue_.front());
-      queue_.pop_front();
+      auto current = std::move(self->queue_.front());
+      self->queue_.pop_front();
 
       boost::asio::async_write(
-          socket_, boost::asio::buffer(current),
+          self->socket_, boost::asio::buffer(current),
           boost::asio::bind_executor(
-              strand_,
-              [this, self](boost::system::error_code err_code, std::size_t n) {
+              self->strand_,
+              [self](boost::system::error_code err_code, std::size_t n) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "stream write failed: " << err_code.message();
                   // Close the socket; queued messages remain. Next enqueue will
                   // reconnect.
                   boost::system::error_code ignore;
-                  socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both,
-                                   ignore);
-                  socket_.close(ignore);
-                  connected_ = false;
+                  self->socket_.shutdown(
+                      boost::asio::ip::tcp::socket::shutdown_both, ignore);
+                  self->socket_.close(ignore);
+                  self->connected_ = false;
                   return;
                 }
-                BOOST_LOG_TRIVIAL(debug)
-                    << "stream sent " << n << " bytes to " << remote_endpoint_;
-                if (!queue_.empty()) {
-                  write();
+                BOOST_LOG_TRIVIAL(debug) << "stream sent " << n << " bytes to "
+                                         << self->remote_endpoint_;
+                if (!self->queue_.empty()) {
+                  self->write();
                 }
               }));
     }

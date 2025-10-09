@@ -1,14 +1,16 @@
 // Copyright (c) 2025, Joe Dinius, Ph.D.
 // SPDX-License-Identifier: Apache-2.0
-#include "simpleio/transports/ip/ip.hpp"
+#include "simpleio/transports/ip/detail/ip.hpp"
 
 #include <memory>
 #include <utility>
 
+#include "simpleio/transports/ip/ip.hpp"
+
 using namespace simpleio::transports::ip;  // NOLINT [build/namespaces]
 namespace basio = boost::asio;
 
-IoWorker::IoWorker()
+detail::Context::Context()
     : scheduler_(std::make_shared<basio::io_context>()), scheduler_threads_(1) {
   BOOST_LOG_TRIVIAL(debug) << "Created IoWorker with shared io_context";
   BOOST_LOG_TRIVIAL(debug) << "Starting io_context thread";
@@ -24,7 +26,7 @@ IoWorker::IoWorker()
   });
 }
 
-IoWorker::IoWorker(uint8_t num_threads)
+detail::Context::Context(uint8_t num_threads)
     : scheduler_(std::make_shared<basio::io_context>()),
       scheduler_threads_(num_threads) {
   BOOST_LOG_TRIVIAL(debug) << "Created IoWorker with shared io_context and "
@@ -44,7 +46,7 @@ IoWorker::IoWorker(uint8_t num_threads)
   }
 }
 
-IoWorker::~IoWorker() {
+detail::Context::~Context() {
   BOOST_LOG_TRIVIAL(debug) << "Stopping io_context threads";
   lifecycle_manager_.reset();
   scheduler_->stop();
@@ -54,8 +56,4 @@ IoWorker::~IoWorker() {
     }
   }
   BOOST_LOG_TRIVIAL(debug) << "Stopped io_context threads";
-}
-
-std::shared_ptr<boost::asio::io_context> IoWorker::scheduler() const {
-  return scheduler_;
 }

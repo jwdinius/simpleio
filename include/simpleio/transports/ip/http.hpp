@@ -41,7 +41,7 @@ class Client : public simpleio::Client<ServiceT>,
   ///          a remote endpoint, and a timeout duration.
   /// @param ioc, the shared io_context to use for asynchronous operations.
   /// @param remote_endpoint, the remote endpoint to connect to.
-  /// @param timeout, the timeout duration for operations.
+  /// @param timeout, the timeout duration for operations (in seconds).
   explicit Client(std::shared_ptr<boost::asio::io_context> ioc,
                   boost::asio::ip::tcp::endpoint remote_endpoint,
                   std::chrono::duration<int> timeout)
@@ -62,10 +62,12 @@ class Client : public simpleio::Client<ServiceT>,
   ///          the response once it is received.
   std::future<typename ServiceT::ResponseT> send_request_async(
       typename ServiceT::RequestT const& req) override {
-    req_ = req.entity();
-    promise_ = std::make_shared<std::promise<typename ServiceT::ResponseT>>();
-    connect();
-    return promise_->get_future();
+    auto self = this->shared_from_this();
+    self->req_ = req.entity();
+    self->promise_ =
+        std::make_shared<std::promise<typename ServiceT::ResponseT>>();
+    self->connect();
+    return self->promise_->get_future();
   }
 
   /// @brief Synchronously sends a request and returns a response.
@@ -73,7 +75,8 @@ class Client : public simpleio::Client<ServiceT>,
   /// @return typename ServiceT::ResponseT, the response.
   typename ServiceT::ResponseT send_request(
       typename ServiceT::RequestT const& req) override {
-    auto future = send_request_async(req);
+    auto self = this->shared_from_this();
+    auto future = self->send_request_async(req);
     // Wait for the future to complete and return the response
     if (!future.valid()) {
       throw TransportException(
@@ -86,37 +89,39 @@ class Client : public simpleio::Client<ServiceT>,
   /// @brief Connects to the remote endpoint and starts the asynchronous
   /// request.
   void connect() {
+    auto self = this->shared_from_this();
     BOOST_LOG_TRIVIAL(debug) << "http::Client connecting.";
 
-    stream_.expires_after(timeout_);
-    stream_.async_connect(
-        remote_endpoint_,
-        boost::beast::bind_front_handler(&Client<ServiceT>::write_request,
-                                         this->shared_from_this()));
+    self->stream_.expires_after(self->timeout_);
+    self->stream_.async_connect(self->remote_endpoint_,
+                                boost::beast::bind_front_handler(
+                                    &Client<ServiceT>::write_request, self));
   }
 
   /// @brief Writes the request to the remote endpoint after a successful
   /// connection.
   void write_request(boost::beast::error_code err_code) {
+    auto self = this->shared_from_this();
     if (err_code) {
       return fail(err_code, "Connection failed.");
     }
     BOOST_LOG_TRIVIAL(debug) << "http::Client connected, sending request.";
 
     // Set a timeout on the operation
-    stream_.expires_after(timeout_);
+    self->stream_.expires_after(self->timeout_);
 
     // Send the HTTP request to the remote host
     boost::beast::http::async_write(
-        stream_, req_,
+        self->stream_, self->req_,
         boost::beast::bind_front_handler(&Client<ServiceT>::await_response,
-                                         this->shared_from_this()));
+                                         self));
   }
 
   /// @brief Awaits the response after sending the request.
   void await_response(boost::beast::error_code err_code,
                       std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    auto self = this->shared_from_this();
     if (err_code) {
       return fail(err_code, "Failed to send request.");
     }
@@ -124,9 +129,9 @@ class Client : public simpleio::Client<ServiceT>,
 
     // Receive the HTTP response
     boost::beast::http::async_read(
-        stream_, buffer_, res_,
+        self->stream_, self->buffer_, self->res_,
         boost::beast::bind_front_handler(&Client<ServiceT>::handle_response,
-                                         this->shared_from_this()));
+                                         self));
   }
 
   /// @brief Handles the response received from the remote endpoint after it has
@@ -136,17 +141,19 @@ class Client : public simpleio::Client<ServiceT>,
   void handle_response(boost::beast::error_code err_code,
                        std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    auto self = this->shared_from_this();
     if (err_code) {
       return fail(err_code, "Failed to read response.");
     }
     BOOST_LOG_TRIVIAL(debug) << "http::Client received response.";
 
-    promise_->set_value(typename ServiceT::ResponseT(std::move(res_)));
+    self->promise_->set_value(
+        typename ServiceT::ResponseT(std::move(self->res_)));
 
     // Gracefully close the socket
-    stream_.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_both,
-                              err_code);
-    stream_.socket().close();
+    self->stream_.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_both,
+                                    err_code);
+    self->stream_.socket().close();
 
     // not_connected happens sometimes so don't bother reporting it.
     if (err_code && err_code != boost::beast::errc::not_connected) {

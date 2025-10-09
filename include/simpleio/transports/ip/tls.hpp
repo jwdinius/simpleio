@@ -5,24 +5,15 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/log/trivial.hpp>
 #include <deque>
-#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 #include "simpleio/transport.hpp"
+#include "simpleio/transports/ip/typedefs.hpp"
 
 namespace simpleio::transports::ip::tls {
-
-/// @brief Credentials files for TLS v1.3 transport.
-/// @details This struct holds the paths to the Certificate Authority (CA) file,
-///          the certificate file, and the private key file.
-struct Credentials {
-  std::filesystem::path ca_file;
-  std::filesystem::path cert_file;
-  std::filesystem::path key_file;
-};
 
 /// @brief Strategy for sending messages over TLS v1.3.
 /// @details This class uses a TCP socket to send messages of type MessageT
@@ -32,16 +23,16 @@ template <typename MessageT>
 class Sender : public simpleio::Sender<MessageT>,
                public std::enable_shared_from_this<Sender<MessageT>> {
  public:
-  /// @brief Construct from a shared io_context, Credentials struct, and a
+  /// @brief Construct from a shared io_context, TlsCredentials struct, and a
   /// remote endpoint.
   /// @param io_ctx, the shared io_context.
   /// @param remote_endpoint, the remote endpoint to send to.
-  /// @param config, Credentials struct to use.
+  /// @param config, TlsCredentials struct to use.
   /// @throw TransportException, if an error occurs while setting up the SSL
   /// context.
   explicit Sender(std::shared_ptr<boost::asio::io_context> io_ctx,
                   boost::asio::ip::tcp::endpoint remote_endpoint,
-                  Credentials const& config,
+                  TlsCredentials const& config,
                   std::shared_ptr<simpleio::Framer> framer =
                       std::make_shared<simpleio::DefaultFramer>(),
                   bool streaming = false)
@@ -98,9 +89,9 @@ class Sender : public simpleio::Sender<MessageT>,
     void start() {
       auto self = this->shared_from_this();
       socket_.lowest_layer().async_connect(
-          remote_endpoint_,
+          self->remote_endpoint_,
           boost::asio::bind_executor(
-              strand_, [self](boost::system::error_code err_code) {
+              self->strand_, [self](boost::system::error_code err_code) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "TCP connect failed: " << err_code.message();
@@ -118,7 +109,7 @@ class Sender : public simpleio::Sender<MessageT>,
       socket_.async_handshake(
           boost::asio::ssl::stream_base::client,
           boost::asio::bind_executor(
-              strand_, [self](boost::system::error_code err_code) {
+              self->strand_, [self](boost::system::error_code err_code) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "TLS handshake failed: " << err_code.message();
@@ -132,9 +123,9 @@ class Sender : public simpleio::Sender<MessageT>,
     void write() {
       auto self = this->shared_from_this();
       boost::asio::async_write(
-          socket_, boost::asio::buffer(blob_.data(), blob_.size()),
+          self->socket_, boost::asio::buffer(blob_.data(), blob_.size()),
           boost::asio::bind_executor(
-              strand_,
+              self->strand_,
               [self](boost::system::error_code err_code, std::size_t bytes) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
@@ -150,7 +141,7 @@ class Sender : public simpleio::Sender<MessageT>,
     void shutdown() {
       auto self = this->shared_from_this();
       socket_.async_shutdown(boost::asio::bind_executor(
-          strand_, [self](boost::system::error_code err_code) {
+          self->strand_, [self](boost::system::error_code err_code) {
             if (err_code && err_code != boost::asio::error::eof) {
               BOOST_LOG_TRIVIAL(error)
                   << "TLS shutdown failed: " << err_code.message();
@@ -180,32 +171,39 @@ class Sender : public simpleio::Sender<MessageT>,
           strand_(std::move(strand)) {}
 
     ~StreamingSession() {
-      close();
+      boost::system::error_code ec;
+      socket_.lowest_layer().shutdown(
+          boost::asio::ip::tcp::socket::shutdown_both, ec);
+      socket_.lowest_layer().close(ec);
+      connected_ = false;
+      connecting_ = false;
+      queue_.clear();
     }
 
     void enqueue(std::string blob) {
       auto self = this->shared_from_this();
       boost::asio::dispatch(
-          strand_, [this, self, blob = std::move(blob)]() mutable {
-            queue_.emplace_back(std::move(blob));
-            if (!connected() && !connecting_) {
-              return connect();
+          self->strand_, [self, blob = std::move(blob)]() mutable {
+            self->queue_.emplace_back(std::move(blob));
+            if (!self->connected() && !self->connecting_) {
+              return self->connect();
             }
-            if (connected()) {
-              return write();
+            if (self->connected()) {
+              return self->write();
             }
             BOOST_LOG_TRIVIAL(warning) << "enqueue fell through";
           });
     }
 
     bool connected() {
-      return connected_ && socket_.lowest_layer().is_open();
+      auto self = this->shared_from_this();
+      return self->connected_ && self->socket_.lowest_layer().is_open();
     }
 
     void close() {
       auto self = this->shared_from_this();
-      socket_.async_shutdown(boost::asio::bind_executor(
-          strand_, [self](boost::system::error_code err_code) {
+      self->socket_.async_shutdown(boost::asio::bind_executor(
+          self->strand_, [self](boost::system::error_code err_code) {
             if (err_code && err_code != boost::asio::error::eof) {
               BOOST_LOG_TRIVIAL(error)
                   << "TLS shutdown failed: " << err_code.message();
@@ -219,13 +217,13 @@ class Sender : public simpleio::Sender<MessageT>,
 
    private:
     void connect() {
-      connecting_ = true;
       auto self = this->shared_from_this();
-      socket_.lowest_layer().async_connect(
-          remote_endpoint_,
+      self->connecting_ = true;
+      self->socket_.lowest_layer().async_connect(
+          self->remote_endpoint_,
           boost::asio::bind_executor(
-              strand_, [this, self](boost::system::error_code err_code) {
-                connecting_ = false;
+              self->strand_, [self](boost::system::error_code err_code) {
+                self->connecting_ = false;
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "TCP stream connect failed: " << err_code.message();
@@ -239,10 +237,10 @@ class Sender : public simpleio::Sender<MessageT>,
 
     void handshake() {
       auto self = this->shared_from_this();
-      socket_.async_handshake(
+      self->socket_.async_handshake(
           boost::asio::ssl::stream_base::client,
           boost::asio::bind_executor(
-              strand_, [self](boost::system::error_code err_code) {
+              self->strand_, [self](boost::system::error_code err_code) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "TLS handshake failed: " << err_code.message();
@@ -257,34 +255,35 @@ class Sender : public simpleio::Sender<MessageT>,
     }
 
     void write() {
-      if (queue_.empty() || !connected()) {
+      auto self = this->shared_from_this();
+      if (self->queue_.empty() || !self->connected()) {
         return;
       }
-      auto self = this->shared_from_this();
 
       // coalesce front message into a buffer; if you want to write multiple
       // frames at once, you could gather-write here. For simplicity, one frame
       // at a time:
-      auto current = std::move(queue_.front());
-      queue_.pop_front();
+      auto current = std::move(self->queue_.front());
+      self->queue_.pop_front();
 
       boost::asio::async_write(
-          socket_, boost::asio::buffer(current),
+          self->socket_, boost::asio::buffer(current),
           boost::asio::bind_executor(
-              strand_,
-              [this, self](boost::system::error_code err_code, std::size_t n) {
+              self->strand_,
+              [self](boost::system::error_code err_code, std::size_t n) {
                 if (err_code) {
                   BOOST_LOG_TRIVIAL(error)
                       << "TLS stream write failed: " << err_code.message();
                   // Close the socket; queued messages remain. Next enqueue will
                   // reconnect.
-                  close();
+                  self->close();
                   return;
                 }
-                BOOST_LOG_TRIVIAL(debug) << "TLS stream sent " << n
-                                         << " bytes to " << remote_endpoint_;
-                if (!queue_.empty()) {
-                  write();
+                BOOST_LOG_TRIVIAL(debug)
+                    << "TLS stream sent " << n << " bytes to "
+                    << self->remote_endpoint_;
+                if (!self->queue_.empty()) {
+                  self->write();
                 }
               }));
     }
@@ -315,20 +314,21 @@ template <typename MessageT>
 class Receiver : public simpleio::Receiver<MessageT>,
                  public std::enable_shared_from_this<Receiver<MessageT>> {
  public:
-  /// @brief Construct from a shared io_context, Credentials struct, a local
+  /// @brief Construct from a shared io_context, TlsCredentials struct, a local
   /// endpoint, and a callback function.
   /// @param io_ctx, the shared io_context.
   /// @param local_endpoint, the local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   ///                    received.
-  /// @param config, Credentials struct to use.
+  /// @param config, TlsCredentials struct to use.
   /// @param framer, the framing strategy to use for incoming messages.
   /// @throw TransportException, if an error occurs while setting up the SSL
   /// context.
   Receiver(std::shared_ptr<boost::asio::io_context> const& io_ctx,
            boost::asio::ip::tcp::endpoint const& local_endpoint,
            typename simpleio::Receiver<MessageT>::callback_t message_cb,
-           Credentials const& config, std::shared_ptr<simpleio::Framer> framer)
+           TlsCredentials const& config,
+           std::shared_ptr<simpleio::Framer> framer)
       : acceptor_(*io_ctx, local_endpoint),
         ssl_ctx_(boost::asio::ssl::context::tlsv13),
         strand_(boost::asio::make_strand(*io_ctx)),
@@ -353,7 +353,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param local_endpoint, local endpoint to listen on.
   /// @param message_cb, the callback function to call when a message is
   /// received.
-  /// @param config, Credentials struct to use.
+  /// @param config, TlsCredentials struct to use.
   /// @param framer, the framing strategy to use for incoming messages (default:
   /// DefaultFramer)
   /// @return A shared pointer to an initialized tls::Receiver.
@@ -361,7 +361,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
       std::shared_ptr<boost::asio::io_context> const& io_ctx,
       boost::asio::ip::tcp::endpoint const& local_endpoint,
       typename Receiver<MessageT>::callback_t message_cb,
-      Credentials const& config,
+      TlsCredentials const& config,
       std::shared_ptr<simpleio::Framer> framer =
           std::make_shared<simpleio::DefaultFramer>()) {
     auto receiver = std::make_shared<Receiver<MessageT>>(
@@ -386,7 +386,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
   /// @param message, the received message.
   void on_read(MessageT const& message) override {
     auto self = this->shared_from_this();
-    boost::asio::dispatch(strand_,
+    boost::asio::dispatch(self->strand_,
                           [self, message]() { self->message_cb_(message); });
   }
 
@@ -403,7 +403,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
     acceptor_.async_accept(
         socket->lowest_layer(),
         boost::asio::bind_executor(
-            strand_, [self, socket](boost::system::error_code err_code) {
+            self->strand_, [self, socket](boost::system::error_code err_code) {
               if (!err_code) {
                 BOOST_LOG_TRIVIAL(info)
                     << "Accepted secure connection from "
@@ -428,7 +428,7 @@ class Receiver : public simpleio::Receiver<MessageT>,
     socket->async_handshake(
         boost::asio::ssl::stream_base::server,
         boost::asio::bind_executor(
-            strand_, [self, socket](boost::system::error_code err_code) {
+            self->strand_, [self, socket](boost::system::error_code err_code) {
               if (!err_code) {
                 BOOST_LOG_TRIVIAL(debug) << "TLSv1.3 handshake successful!";
                 self->start_receiving(socket);
@@ -454,12 +454,12 @@ class Receiver : public simpleio::Receiver<MessageT>,
         std::make_shared<std::string>(MessageT::max_blob_size, '\0');
 
     auto do_read = std::make_shared<std::function<void()>>();
-    *do_read = [this, self, socket, buffer, read_buffer, do_read]() -> void {
+    *do_read = [self, socket, buffer, read_buffer, do_read]() -> void {
       socket->async_read_some(
           boost::asio::buffer(*read_buffer),
           boost::asio::bind_executor(
-              strand_,
-              [this, self, socket, buffer, read_buffer, do_read](
+              self->strand_,
+              [self, socket, buffer, read_buffer, do_read](
                   boost::system::error_code err_code, std::size_t bytes_recvd) {
                 if (err_code && err_code != boost::asio::error::eof) {
                   BOOST_LOG_TRIVIAL(error)
@@ -470,14 +470,14 @@ class Receiver : public simpleio::Receiver<MessageT>,
                     << "TLS received " << bytes_recvd << " bytes.";
                 buffer->append(read_buffer->data(), bytes_recvd);
                 std::string msg;
-                while (framer_->try_unframe(*buffer, msg)) {
+                while (self->framer_->try_unframe(*buffer, msg)) {
                   self->on_read(MessageT(msg));
                 }
                 (*do_read)();  // recurse
               }));
     };
 
-    boost::asio::dispatch(strand_, [do_read]() { (*do_read)(); });
+    boost::asio::dispatch(self->strand_, [do_read]() { (*do_read)(); });
   }
 
   boost::asio::ip::tcp::acceptor acceptor_;

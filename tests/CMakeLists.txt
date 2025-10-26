@@ -50,8 +50,6 @@ target_link_libraries(test_transports_ip
     ${GTEST_LIBRARIES}
     pthread
     Boost::system
-    Boost::log
-    Boost::log_setup
     ${PROJECT_NAME}::transports::ip
 )
 add_test(NAME test_transports_ip COMMAND test_transports_ip)

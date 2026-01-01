@@ -61,6 +61,8 @@ target_sources(transports_ip
 target_link_libraries(transports_ip
   PUBLIC
     base
+    Boost::log
+    Boost::log_setup
     Boost::system
     OpenSSL::SSL  # Needed b/c Boost doesn't export dependencies properly
 )

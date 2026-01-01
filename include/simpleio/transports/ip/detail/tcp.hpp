@@ -53,12 +53,13 @@ class Sender : public simpleio::Sender<MessageT>,
   ///          Sessions connect and send the message asynchronously.
   /// @param msg, the message to send.
   void send(MessageT const& msg) override {
+    auto framed_msg = framer_->frame(msg.blob());
     if (streaming_session_) {
-      streaming_session_->enqueue(framer_->frame(msg.blob()));
+      streaming_session_->enqueue(framed_msg);
       return;
     }
-    auto session = std::make_shared<OneShotSession>(
-        io_ctx_, remote_endpoint_, strand_, framer_->frame(msg.blob()));
+    auto session = std::make_shared<OneShotSession>(io_ctx_, remote_endpoint_,
+                                                    strand_, framed_msg);
     session->start();
   }
 

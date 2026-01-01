@@ -33,14 +33,12 @@ Asynchronous `Sender` / `Receiver` examples for common network protocols (UDP, T
 
 ## Contributing to `simpleio`
 
-_WIP_
-
 There's a VS Code [devcontainer](.devcontainer) provided to ease setup of the developer environment.
 Familiarize yourself with the dependencies by looking at the [Dockerfile](.devcontainer/Dockerfile).
 
-## Using `simpleio` in your project
+## `simpleio` in other projects
 
-_WIP_
+* [`taktile`](https://github.com/jwdinius/taktile) - _C++ client library for Team Awareness Kit ([TAK](https://www.civtak.org/atak-about/))_
 
 ## Miscellanea
 
